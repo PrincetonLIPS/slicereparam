@@ -1,0 +1,2 @@
+# slicereparam
+Slice sampling reparameterization
