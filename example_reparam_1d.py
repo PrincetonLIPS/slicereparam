@@ -53,7 +53,9 @@ def grad_theta(theta, df, x0, u1, u2):
     dxdtheta = (1.0 - u2) * dxL_dtheta + u2 * dxR_dtheta
 
     x = (1 - u2) * x_L + u2 * x_R
-    return x, df(x) * dxdtheta
+    grad_theta = df(x) * dxdtheta
+
+    return x, grad_theta
 
 xstar = 5.0
 loss = lambda x : (x - xstar)**2

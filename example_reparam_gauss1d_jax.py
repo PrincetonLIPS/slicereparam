@@ -19,7 +19,7 @@ def gaussian_pdf(x, mu, sig2):
     return 1.0 / np.sqrt(2.0 * np.pi* sig2) * np.exp(-0.5 * (x - mu) **2 / sig2)
 
 
-def slice_sample(mu, sig2, us, x0):
+def slice_sample(mu, sig2, us, x):
     """
     x0 - initial x
     mu - mean
@@ -85,7 +85,7 @@ mu2 = -1.0
 #     return (x_new - xstar )**2
 
 def loss(mu, x, us):
-    x_new = slice_sample(mu, sig2, us, x0=x)
+    x_new = slice_sample(mu, sig2, us, x)
     return np.mean((x_new - xstar )**2)
 
 def loss_reparam(mu):

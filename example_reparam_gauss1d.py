@@ -78,11 +78,16 @@ mu2 = -1.0
 
 def loss(mu, x, num_samples=1):
     x_new = slice_sample(mu, sig2, num_samples=num_samples, x0=x)
-    return np.mean((x_new - xstar )**2)
+    return np.mean((x_new - xstar )**2) 
 
-def loss_reparam(mu):
+# def loss_reparam(mu):
+    # x_new = mu + npr.randn()*np.sqrt(sig2)
+    # return (x_new - xstar)**2 
+
+def loss_reparam(params):
     x_new = mu + npr.randn()*np.sqrt(sig2)
-    return (x_new - xstar)**2
+    return (x_new - xstar)**2 - np.log(np.sqrt(2.0 * np.pi * np.exp(1) * params[1]))
+
 
 g1 = grad(loss)
 g2 = grad(loss_reparam)
