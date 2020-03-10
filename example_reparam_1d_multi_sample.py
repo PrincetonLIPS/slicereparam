@@ -134,3 +134,17 @@ plt.ylabel("loss")
 # plt.plot(loss2,'r', label="Reparam")
 # plt.legend()
 plt.tight_layout()
+
+
+
+# test laplace reparam
+# mu = 0
+# b = 0.5
+# S = 50000
+# xs1 = npr.laplace(mu, b, S)
+# es = npr.exponential(1.0, S)
+# ns = npr.randn(S)
+# xs2 = mu + b * np.sqrt(2.0 * es) * ns
+# plt.figure()
+# plt.hist(xs1, color='r', bins=np.arange(-5.0,5.0,0.1), alpha=0.5)
+# plt.hist(xs2, color='b', bins=np.arange(-5.0,5.0,0.1), alpha=0.5)

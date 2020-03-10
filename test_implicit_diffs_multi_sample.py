@@ -182,52 +182,51 @@ print("Root: ", grad_theta_jax)
 
 
 ## Uncomment if you want to run experiment
-# theta_jax = -1.0
-# theta_root = -1.0
-# thetas_jax = []
-# thetas_jax.append(theta_jax)
-# thetas_root = []
-# thetas_root.append(theta_root)
-# x = [0.05]
-# alpha = 0.01 # learning rate
-# losses_jax = []
-# losses_root = []
-# num_iters=500
-# # num_samples=2
-# a0 = 0.2
-# gam = 0.3
-# # run many times
-# for i in range(num_iters):
-#     print(i)
+theta_jax = -1.0
+theta_root = -1.0
+thetas_jax = []
+thetas_jax.append(theta_jax)
+thetas_root = []
+thetas_root.append(theta_root)
+x = [0.05]
+alpha = 0.01 # learning rate
+losses_jax = []
+losses_root = []
+num_iters=500
+a0 = 0.2
+gam = 0.3
+# run many times
+for i in range(num_iters):
+    print(i)
 
-#     # draw samples
-#     us = npr.rand(num_samples,2)
+    # draw samples
+    us = npr.rand(num_samples,2)
 
-#     # learning rate
-#     alpha_t = a0 / (1 + gam * (i+1))
+    # learning rate
+    alpha_t = a0 / (1 + gam * (i+1))
 
-#     # jax
-#     dfdtheta_jax = g_jax(theta_jax, x[-1], us)
-#     theta_jax -= dfdtheta_jax * alpha_t
-#     thetas_jax.append(theta_jax)
-#     # losses_jax.append(np.mean(loss(x_jax)))
+    # jax
+    dfdtheta_jax = g_jax(theta_jax, x[-1], us)
+    theta_jax -= dfdtheta_jax * alpha_t
+    thetas_jax.append(theta_jax)
+    # losses_jax.append(np.mean(loss(x_jax)))
 
-#     # root
-#     x, dfdtheta_root, _, _ = grad_theta(theta_root, df, x[-1], us)
-#     theta_root -= dfdtheta_root * alpha_t
-#     thetas_root.append(theta_root)
-#     losses_root.append(np.mean(loss2(np.array(x))))
+    # root
+    x, dfdtheta_root, _, _, _ = grad_theta(theta_root, df, x[-1], us)
+    theta_root -= dfdtheta_root * alpha_t
+    thetas_root.append(theta_root)
+    losses_root.append(np.mean(loss2(np.array(x))))
 
-# plt.ion()
-# plt.figure()
-# plt.subplot(211)
-# plt.title("min E[(x - 5)^2], x ~ Laplace($\mu$, 1)")
-# plt.plot(thetas_jax,'r',label="jax")
-# plt.plot(thetas_root,'b',label="root")
-# plt.ylabel("$\mu$")
-# plt.plot([0,num_iters],[xstar, xstar],'k--',linewidth=0.5)
-# plt.subplot(212)
-# plt.plot(losses_root,'b', label="Slice")
-# plt.xlabel("iteration")
-# plt.ylabel("loss")
-# plt.tight_layout()
+plt.ion()
+plt.figure()
+plt.subplot(211)
+plt.title("min E[(x - 5)^2], x ~ Laplace($\mu$, 1)")
+plt.plot(thetas_jax,'r',label="jax")
+plt.plot(thetas_root,'b',label="root")
+plt.ylabel("$\mu$")
+plt.plot([0,num_iters],[xstar, xstar],'k--',linewidth=0.5)
+plt.subplot(212)
+plt.plot(losses_root,'b', label="Slice")
+plt.xlabel("iteration")
+plt.ylabel("loss")
+plt.tight_layout()
