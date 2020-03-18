@@ -24,28 +24,6 @@ def gaussian_pdf(x, mu, sig2):
 def gaussian_log_pdf(x, mu, sig2):
     return -0.5 * (x - mu) **2 / sig2 - 0.5 * np.log(2.0 * np.pi * sig2)
 
-mu = 0.0
-sig2 = 1.0
-x_range = np.arange(-4.0,4.0,0.05)
-
-x0 = 0.05
-# regular pdf
-u1 = npr.rand()
-u2 = npr.rand()
-e1 = -np.log(u1)
-
-y_pdf = gaussian_pdf(x0, mu, sig2) * u1 
-y_logpdf = gaussian_log_pdf(x0, mu, sig2) - e1
-
-plt.ion()
-plt.figure()
-plt.subplot(211)
-plt.plot(x_range, gaussian_pdf(x_range, mu, sig2))
-plt.plot(x0, y_pdf, 'k.')
-plt.subplot(212)
-plt.plot(x_range, gaussian_log_pdf(x_range, mu, sig2))
-plt.plot(x0, y_logpdf, 'k.')
-
 def sqrt_term(y, sig2):
     return np.sqrt(-2.0 * sig2 * np.log(y * np.sqrt(2.0 * np.pi* sig2)))
 
@@ -219,13 +197,30 @@ g_jax = grad(loss)
 g1 = g_jax(mu, x0, us)
 
 # compute loss via root finding slice sampling
-loss2 = lambda x : np.mean((x - xstar)**2)
-df = grad(loss2)
+loss_fun = lambda x : np.mean((x - xstar)**2)
+df = grad(loss_fun)
 xs, grad_theta_jax, dxdthetas1, dxdthetas2 = grad_theta(mu, Sigma, df, us, x0)
 
 print("Jax: ", g1)
 print("Root: ", grad_theta_jax)
 
+# test finite differences
+dx = 0.001
+mu1 = np.array([mu[0]-dx,mu[1]])
+mu2 = np.array([mu[0]+dx,mu[1]])
+xs1, _, _, _ = grad_theta(mu1, Sigma, df, us, x0)
+xs2, _, _, _ = grad_theta(mu2, Sigma, df, us, x0)
+loss1 = loss_fun(xs1)
+loss2 = loss_fun(xs2)
+dmu1 = (loss2 - loss1) / (2.0 * dx)
+mu1 = np.array([mu[0],mu[1]-dx])
+mu2 = np.array([mu[0],mu[1]+dx])
+xs1, _, _, _ = grad_theta(mu1, Sigma, df, us, x0)
+xs2, _, _, _ = grad_theta(mu2, Sigma, df, us, x0)
+loss1 = loss_fun(xs1)
+loss2 = loss_fun(xs2)
+dmu2 = (loss2 - loss1) / (2.0 * dx)
+print("Finite differences: ", np.array([dmu1, dmu2]))
 # num_sampless = [1,2,5]
 # thetas_jax_all = []
 # thetas_root_all = []
@@ -279,28 +274,28 @@ print("Root: ", grad_theta_jax)
 # root_colors = [[0.7,0.7,1.0], [0.35,0.35,1.0], [0.0,0.0,1.0]]
 # # jax_colors = [[1.0,0.75,0.75], [1.0,0.5,0.5], [1.0,0.25,0.25], [1.0,0.0,0.0]]
 # # root_colors = [[0.75, 0.75, 1.0], [0.5,0.5,1.0], [0.25,0.25,1.0], [0.0,0.0,1.0]]
-plt.ion()
-plt.figure()
-plt.subplot(311)
-plt.plot([0,num_iters],[xstar[0], xstar[0]],'k--',linewidth=1)
-for i, num_samples in enumerate(num_sampless):
-    plt.plot(thetas_jax_all[i][:,0],'-', color=jax_colors[i],label="autodiff, " + str(num_samples))
-    plt.plot(thetas_root_all[i][:,0],'--', color=root_colors[i],label="implicit, " + str(num_samples))
-plt.legend()
-# plt.plot(thetas_root,'b',label="root")
-plt.ylabel("$\mu_1$")
-plt.subplot(312)
-plt.plot([0,num_iters],[xstar[1], xstar[1]],'k--',linewidth=1)
-for i, num_samples in enumerate(num_sampless):
-    plt.plot(thetas_jax_all[i][:,1],'-', color=jax_colors[i],label="root")
-    plt.plot(thetas_root_all[i][:,1],'--', color=root_colors[i],label="jax")
-# plt.plot(thetas_root,'b',label="root")
-plt.ylabel("$\mu_2$")
-plt.subplot(313)
-for i, num_samples in enumerate(num_sampless):
-    curr_loss = losses_all[i]
-    smoothed_loss = [np.mean(curr_loss[max(i-1,0):i+2]) for i in range(len(curr_loss))]
-    plt.plot(smoothed_loss,'-', color=root_colors[i],label="jax")
-plt.xlabel("iteration")
-plt.ylabel("loss")
-plt.tight_layout()
+# plt.ion()
+# plt.figure()
+# plt.subplot(311)
+# plt.plot([0,num_iters],[xstar[0], xstar[0]],'k--',linewidth=1)
+# for i, num_samples in enumerate(num_sampless):
+#     plt.plot(thetas_jax_all[i][:,0],'-', color=jax_colors[i],label="autodiff, " + str(num_samples))
+#     plt.plot(thetas_root_all[i][:,0],'--', color=root_colors[i],label="implicit, " + str(num_samples))
+# plt.legend()
+# # plt.plot(thetas_root,'b',label="root")
+# plt.ylabel("$\mu_1$")
+# plt.subplot(312)
+# plt.plot([0,num_iters],[xstar[1], xstar[1]],'k--',linewidth=1)
+# for i, num_samples in enumerate(num_sampless):
+#     plt.plot(thetas_jax_all[i][:,1],'-', color=jax_colors[i],label="root")
+#     plt.plot(thetas_root_all[i][:,1],'--', color=root_colors[i],label="jax")
+# # plt.plot(thetas_root,'b',label="root")
+# plt.ylabel("$\mu_2$")
+# plt.subplot(313)
+# for i, num_samples in enumerate(num_sampless):
+#     curr_loss = losses_all[i]
+#     smoothed_loss = [np.mean(curr_loss[max(i-1,0):i+2]) for i in range(len(curr_loss))]
+#     plt.plot(smoothed_loss,'-', color=root_colors[i],label="jax")
+# plt.xlabel("iteration")
+# plt.ylabel("loss")
+# plt.tight_layout()

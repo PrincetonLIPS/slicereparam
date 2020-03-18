@@ -52,10 +52,10 @@ mu4 = np.array([1,1])
 Sigma = 1*np.eye(2)
 def pdf(x):
     d = x.shape[0]
-    p1 = np.exp(-0.5 * np.dot(x - mu1, x - mu1) / 0.75)
-    p2 = np.exp(-0.5 * np.dot(x - mu2, x - mu2) / 0.75)
-    p3 = np.exp(-0.5 * np.dot(x - mu3, x - mu3) / 0.75)
-    p4 = np.exp(-0.5 * np.dot(x - mu4, x - mu4) / 0.75)
+    p1 = np.exp(-0.5 * np.dot(x - mu1, x - mu1) / 0.5)
+    p2 = np.exp(-0.5 * np.dot(x - mu2, x - mu2) / 0.5)
+    p3 = np.exp(-0.5 * np.dot(x - mu3, x - mu3) / 0.5)
+    p4 = np.exp(-0.5 * np.dot(x - mu4, x - mu4) / 0.5)
     return w1*p1 + w2*p2 + w3*p3 + w4*p4
 
 # H = 25
@@ -75,7 +75,7 @@ def pdf(x):
 #     return  np.exp(out) * np.exp(-0.5 * (x - mu).T @ np.linalg.inv(Sigma) @ (x - mu)) / normalizer
 
 # run slice sampler
-S = 20000
+S = 10000
 x = npr.randn(2)
 xs = [x]
 
@@ -120,7 +120,7 @@ xs_plot = np.array(xs)
 plt.ion()
 plt.figure(figsize=[8,4])
 plt.subplot(121)
-plt.hist2d(xs_plot[:,0], xs_plot[:,1], range=[[xmin, xmax],[xmin, xmax]], bins=15, density=True)
+plt.hist2d(xs_plot[:,0], xs_plot[:,1], range=[[xmin, xmax],[xmin, xmax]], bins=25, density=True, vmin=0.0, vmax=0.1)
 plt.xlim([xmin, xmax])
 plt.ylim([xmin, xmax])
 plt.colorbar()
@@ -136,7 +136,7 @@ Z = np.zeros(X1.shape)
 for i in range(x1.shape[0]):
     for j in range(x2.shape[0]):
         Z[j,i] = pdf(np.array([x1[i], x2[j]]))
-plt.imshow(Z / (np.sum(Z) * dx**2), extent=[xmin,xmax,xmin,xmax], origin="lower")
+plt.imshow(Z / (np.sum(Z) * dx**2), extent=[xmin,xmax,xmin,xmax], origin="lower", vmin=0.0, vmax=0.1)
 # plt.plot(mu[0], mu[1], 'k*')
 plt.xlim([xmin, xmax])
 plt.ylim([xmin, xmax])
