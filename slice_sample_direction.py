@@ -12,10 +12,10 @@ from tqdm.auto import trange
 
 D = 3
 theta = np.zeros(D)
-x = 0.5 * np.ones(D)
+x = 0.0 * np.ones(D)
 Sigma = np.eye(D)
 xstar = np.array([1.1,0.5,0.4])
-S = 3
+S = 25
 
 # Sigma = np.array([[1.0, 0.5],[0.5,1.0]])
 # Sigma = np.array([[1.0]])
@@ -25,14 +25,14 @@ def log_pdf(x, theta):
     # normalizer = np.power(2*np.pi, d/2) * np.sqrt(np.linalg.det(Sigma))
     return -0.5 * (x - mu).T @ np.linalg.inv(Sigma) @ (x - mu) #- np.log(normalizer)
 
-sig2 = 1.0
-def log_pdf(x, theta):
-    d = x.shape[0]
-    val = 0.0
-    val += -1.0 * np.abs(x[0] - theta[0]) / sig2
-    val += -1.0 * np.abs(x[1] - theta[1]) / sig2
-    val += -1.0 * np.abs(x[2] - theta[2]) / sig2
-    return val
+# sig2 = 1.0
+# def log_pdf(x, theta):
+#     d = x.shape[0]
+#     val = 0.0
+#     val += -1.0 * np.abs(x[0] - theta[0]) / sig2
+#     val += -1.0 * np.abs(x[1] - theta[1]) / sig2
+#     val += -1.0 * np.abs(x[2] - theta[2]) / sig2
+#     return val
 
 # def pdf(x, mu, sig2):
 #     return 1.0 / (2.0 * sig2) * np.exp(- np.abs(x - mu) / sig2)
@@ -100,7 +100,7 @@ def backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
     # assert ds.shape[0] == S == xLs.shape[0] == xRs.shape[0] == alphas.shape[0] == xs.shape[0]-1
 
     dL_dtheta = np.zeros_like(theta)
-
+    all_Jxs = [0] * S
     for s in range(S-1, -1, -1):
 
         u1 = us[s,0]
@@ -126,13 +126,14 @@ def backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
         L_grad_x = -1.0 * ( grad_x_ad(xs[s], theta, z_L, ds[s]) - grad_x(xs[s], theta) ) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_L, ds[s]))
         R_grad_x = -1.0 * ( grad_x_ad(xs[s], theta, z_R, ds[s]) - grad_x(xs[s], theta) ) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_R, ds[s]))
         J_xs = np.eye(D) + u2 * np.outer(ds[s], R_grad_x) + (1-u2) * np.outer(ds[s], L_grad_x)
+        all_Jxs[s] = J_xs
 
         # store previous loss
         prev_dL_dx_s = np.copy(dL_dx_s)
 
-    return dL_dtheta
+    return dL_dtheta, all_Jxs
 
-dL_dtheta = backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
+dL_dtheta, all_Jxs = backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
                       grad_theta, grad_x, grad_x_ad, dL_dx)
 
 dx = 0.001
@@ -151,52 +152,76 @@ for d in range(D):
 
 print("Implicit: ", dL_dtheta)
 print("Numerical: ", dthetas)
-
+print("All close? : ", np.allclose(dL_dtheta, dthetas))
 # use for optimization!
-xstar = np.array([1.1,-0.5,0.4])
-loss_fun = lambda x : np.mean((x - xstar)**2)
-dL_dx = grad(loss_fun)
+# xstar = np.array([1.1,-0.5,0.4])
+# loss_fun = lambda x : np.mean((x - xstar)**2)
+# dL_dx = grad(loss_fun)
 
-theta = np.zeros(D)
-thetas = []
-losses = [loss_fun(xs)]
-xs = [theta]
-S = 3
-num_iters=1000
+# theta = np.zeros(D)
+# thetas = []
+# losses = [loss_fun(xs)]
+# xs = [theta]
+# S = 3
+# num_iters=1000
 
-# learning rate params
-a0 = 0.5
-gam = 0.2
+# # learning rate params
+# a0 = 0.5
+# gam = 0.2
 
-pbar = trange(num_iters)
-pbar.set_description("Loss: {:.1f}".format(losses[0]))
+# pbar = trange(num_iters)
+# pbar.set_description("Loss: {:.1f}".format(losses[0]))
 
-for i in range(num_iters):
+# for i in range(num_iters):
 
-    us = npr.rand(S, 2)
-    ds = npr.randn(S, D)
-    ds = np.array([d / np.linalg.norm(d) for d in ds])
+#     us = npr.rand(S, 2)
+#     ds = npr.randn(S, D)
+#     ds = np.array([d / np.linalg.norm(d) for d in ds])
 
-    # forward pass
-    xs, xLs, xRs, alphas = forwards(theta, xs[-1], log_pdf, us, ds)
+#     # forward pass
+#     xs, xLs, xRs, alphas = forwards(theta, xs[-1], log_pdf, us, ds)
 
-    # backwards pass
-    dL_dtheta = backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
-                      grad_theta, grad_x, grad_x_ad, dL_dx)
+#     # backwards pass
+#     dL_dtheta = backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
+#                       grad_theta, grad_x, grad_x_ad, dL_dx)
 
-    # update parameters
-    alpha_t = a0 / (1 + gam * (i+1)) # learning rate 
-    theta = theta - dL_dtheta * alpha_t
-    thetas.append(theta)
-    losses.append(loss_fun(xs[1:]))
+#     # update parameters
+#     alpha_t = a0 / (1 + gam * (i+1)) # learning rate 
+#     theta = theta - dL_dtheta * alpha_t
+#     thetas.append(theta)
+#     losses.append(loss_fun(xs[1:]))
 
-    pbar.set_description("Loss: {:.1f}".format(losses[-1]))
-    pbar.update()
-pbar.close()
+#     pbar.set_description("Loss: {:.1f}".format(losses[-1]))
+#     pbar.update()
+# pbar.close()
 
-thetas_plot = np.array(thetas)
-plt.ion()
-plt.figure()
-for d in range(D):
-    plt.plot([0,num_iters],xstar[d]*np.ones(2),'k--')
-plt.plot(thetas_plot,'b')
+# thetas_plot = np.array(thetas)
+# plt.ion()
+# plt.figure()
+# for d in range(D):
+#     plt.plot([0,num_iters],xstar[d]*np.ones(2),'k--')
+# plt.plot(thetas_plot,'b')
+
+# analyze Jxs
+# us = npr.rand(S, 2)
+# ds = npr.randn(S, D)
+# ds = np.array([d / np.linalg.norm(d) for d in ds])
+
+# x = 0.5 * np.ones(D)
+# xs, xLs, xRs, alphas = forwards(theta, x, log_pdf, us, ds)
+# dL_dtheta, all_Jxs = backwards(theta, log_pdf, us, ds, xs, xLs, xRs, alphas,
+#                       grad_theta, grad_x, grad_x_ad, dL_dx)
+
+# spectral_radius = np.zeros(S)
+# cumulative_Jx = np.eye(D)
+# for s in range(S):
+#     cumulative_Jx = cumulative_Jx @ all_Jxs[s]
+#     es = np.linalg.eigvals(cumulative_Jx)
+#     spectral_radius[s] = np.max(np.abs(es))
+
+# plt.ion()
+# plt.figure()
+# plt.subplot(211)
+# plt.plot(xs)
+# plt.subplot(212)
+# plt.plot(np.arange(1,S+1),spectral_radius)
