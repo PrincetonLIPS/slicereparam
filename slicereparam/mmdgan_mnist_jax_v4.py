@@ -56,89 +56,109 @@ def visualize_2D(f, params=None, xmin=-5.0, xmax=5.0, dx=0.1, ax=None, vmin=0.0,
 def f_alpha(alpha, x, d, theta, u1):
     return log_pdf(x + alpha * d, theta) - log_pdf(x, theta) - np.log(u1)
 
+@jit
+def fa(x, alpha, d, theta, u1):
+    return log_pdf(x + alpha * d, theta) - log_pdf(x, theta) - np.log(u1)
+
+@jit
+def dual_bisect_method(
+    x, d, theta, u1,
+    aL=-1e5, bL=-1e-5, aR=1e-5, bR=1e5,
+    tol=1e-6, maxiter=100):
+
+    i = maxiter-1.0
+    init_val = [aL, bL, aR, bR, i]
+
+    def cond_fun(val):
+        aL, bL, aR, bR, i = val
+        # return np.maximum(bL-aL, bR-aR) > 2.0 * tol
+        # return np.sum((b-a) / 2.0) > tol
+        return np.sum(bL-aL) + np.sum(bR-aR) + 100 * np.minimum(i, 0.0) > tol
+
+    def body_fun(val):
+
+        aL, bL, aR, bR, i = val
+        cL = (aL+bL)/2.0
+        cR = (aR+bR)/2.0
+
+        # alphas = np.array([aL, bL, cL, aR, bR, cR])
+        # sign_aL, sign_bL, sign_cL, sign_aR, sign_bR, sign_cR = np.sign(fa_batched(x, alphas, d, theta, u1))
+
+        # L
+        sign_cL = np.sign(fa(x, cL, d, theta, u1))
+        sign_aL = np.sign(fa(x, aL, d, theta, u1))
+        sign_bL = np.sign(fa(x, bL, d, theta, u1))
+        aL = np.sum(cL * np.maximum( sign_cL * sign_aL, 0.0) + \
+            aL * np.maximum( -1.0 * sign_cL * sign_aL, 0.0))
+        bL = np.sum(cL * np.maximum( sign_cL * sign_bL, 0.0) + \
+            bL * np.maximum( -1.0 * sign_cL * sign_bL, 0.0))
+
+        # R
+        sign_cR = np.sign(fa(x, cR, d, theta, u1))
+        sign_aR = np.sign(fa(x, aR, d, theta, u1))
+        sign_bR = np.sign(fa(x, bR, d, theta, u1))
+        aR = np.sum(cR * np.maximum( sign_cR * sign_aR, 0.0) + \
+            aR * np.maximum( -1.0 * sign_cR * sign_aR, 0.0))
+        bR = np.sum(cR * np.maximum( sign_cR * sign_bR, 0.0) + \
+            bR * np.maximum( -1.0 * sign_cR * sign_bR, 0.0))
+
+        i = i + 1
+        val = [aL, bL, aR, bR, i]
+
+        return val
+
+    val = lax.while_loop(cond_fun, body_fun, init_val)
+    aL, bL, aR, bR, i = val 
+    cL = (aL+bL)/2.0
+    cR = (aR+bR)/2.0
+    return [cL, cR]
+
+a_grid = np.concatenate((np.logspace(-3,1, 25), np.array([25.0])))
+
+@jit
+def fa_grid(x, d, theta, u1):
+    fout = []
+    for a in a_grid:
+        fout.append(f_alpha(a, x, d, theta, u1))
+    return np.array(fout)
+
+@jit
+def fma_grid(x, d, theta, u1):
+    fout = []
+    for a in a_grid:
+        fout.append(f_alpha(-1.0 * a, x, d, theta, u1))
+    return np.array(fout)
+
 # @jit
-# def choose_as(x, d, theta, u1):
-#     alphas = np.logspace(-1,4,6)
-#     for alpha in alphas:
+@jit
+def forwards_step(x, theta, u1, u2, d, aL, bR):
+    # z_L = bisect_method(x, d, theta, u1, a=-25.0, b=-1e-10)
+    # z_R = bisect_method(x, d, theta, u1, a=1e-10, b=25.0)
+    # z_L, z_R = dual_bisect_method(x, d, theta, u1, aL=-25.0, bL=-1e-10, aR=1e-10, bR=25.0)
+    z_L, z_R = dual_bisect_method(x, d, theta, u1, aL=aL, bL=-1e-10, aR=1e-10, bR=bR)
+    x_L = x + d*z_L
+    x_R = x + d*z_R
+    x = (1 - u2) * x_L + u2 * x_R
+    alphas = np.array([z_L, z_R])
+    return x, x_L, x_R, alphas
 
-
-def forwards(S, theta, x, f_alpha, us, ds):
+# @jit
+def forwards(S, theta, x, us, ds):
     xs = [x]
     xLs = []
     xRs = []
     alphas = []
-
     for s in range(S):
-
-        # import ipdb; ipdb.set_trace()
-        u1 = us[s,0]
-        u2 = us[s,1]
-        d = ds[s]
-
-        fz = lambda alpha : f_alpha(alpha, x, d, theta, u1)
-        # xrange = np.arange(-15.0,0.0,0.01)
-        # yvals = np.array([fz(xv) for xv in xrange])
-        # plt.plot(xrange, yvals)
-        # import ipdb; ipdb.set_trace()
-        # plt.clf()
-        z_L = brentq(fz, a=-1e8, b=-1e-10)
-        z_R = brentq(fz, a=1e-10, b=1e8)
-        # fz = lambda alpha : f_alpha(alpha, x, d, theta, u1)
-        # z_L = brentq(f_alpha, args=(x, d, theta, u1), a=-1e8, b=-1e-10)
-        # z_R = brentq(f_alpha, args=(x, d, theta, u1), a=1e-10, b=1e8)
-        x_L = x + d*z_L
-        x_R = x + d*z_R
-        x = (1 - u2) * x_L + u2 * x_R
-
+        # aL=a_grid[np.where(fa(x, -a_grid, ds[s], theta, us[s,0])<0)[0][0]]*-1.0
+        # aL=a_grid[np.where(fa(x, -a_grid, ds[s], theta, us[s,0])<0)[0][0]]*-1.0
+        aL=a_grid[np.where(fa_grid(x, ds[s], theta, us[s,0])<0)[0][0]]*-1.0
+        bR=a_grid[np.where(fma_grid(x, ds[s], theta, us[s,0])<0)[0][0]]
+        x, x_L, x_R, alpha = forwards_step(x, theta, us[s,0], us[s,1], ds[s], aL, bR)
         xs.append(x)
         xLs.append(x_L)
         xRs.append(x_R)
-        alphas.append(np.array([z_L,z_R]))
-
+        alphas.append(alpha)
     return np.array(xs), np.array(xLs), np.array(xRs), np.array(alphas)
-
-
-S=64
-@partial(jit, static_argnums=(0,8,9,10,12))
-def backwards(S, theta, us, ds, xs, xLs, xRs, alphas,
-              grad_theta, grad_x, grad_x_ad, dL_dxs,
-              loss_grad_params, ys):
-
-    D = xs[0].shape[0]
-    dL_dtheta = np.zeros_like(theta)
-    for s in range(S-1, -1, -1):
-
-        u1 = us[s,0]
-        u2 = us[s,1]
-        z_L = alphas[s][0]
-        z_R = alphas[s][1]
-
-        # compute loss for current sample
-        dL_dx_s = dL_dxs[s] 
-
-        # if not final sample, propagate loss from later samples
-        if s < S-1:
-            dL_dx_s = dL_dx_s + prev_dL_dx
-
-        # compute gradients of xL and xR wrt theta
-        L_grad_theta = -1.0 * (grad_theta(theta, xLs[s]) - grad_theta(theta, xs[s])) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_L, ds[s]))
-        R_grad_theta = -1.0 * (grad_theta(theta, xRs[s]) - grad_theta(theta, xs[s])) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_R, ds[s]))
-
-        # compute gradient dL / dtheta
-        dLd = np.dot(dL_dx_s, ds[s]) # dot product between loss gradient and direction - this is used multiple times 
-        dL_dtheta_s = u2 * dLd * R_grad_theta + (1-u2) * dLd * L_grad_theta
-        dL_dtheta = dL_dtheta + dL_dtheta_s
-
-        # propagate loss backwards : compute gradient times Jacobian of dx_s  / dx_{s-1}
-        L_grad_x = -1.0 * ( grad_x_ad(xs[s], theta, z_L, ds[s]) - grad_x(xs[s], theta) ) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_L, ds[s]))
-        R_grad_x = -1.0 * ( grad_x_ad(xs[s], theta, z_R, ds[s]) - grad_x(xs[s], theta) ) / np.dot(ds[s], grad_x_ad(xs[s], theta, z_R, ds[s]))
-        prev_dL_dx = dL_dx_s + u2 * dLd * R_grad_x + (1-u2) * dLd * L_grad_x
-
-        # if you want to compute Jacobian dx_s / dx_{s-1}, you can use this line of code
-        # J_xs = np.eye(D) + u2 * np.outer(ds[s], R_grad_x) + (1-u2) * np.outer(ds[s], L_grad_x)
-
-    # TODO - do you want loss grad params for xs[1:] or xs?
-    return dL_dtheta + loss_grad_params(theta, xs[1:], ys)
 
 def init_random_params(scale, layer_sizes, key):
     """Build a list of (weights, biases) tuples,
@@ -152,7 +172,7 @@ def init_random_params(scale, layer_sizes, key):
     return params, key
 
 # set up randomness
-key = random.PRNGKey(1)
+key = random.PRNGKey(3)
 
 # Set up params
 D = 2   # number of latent dimensions
@@ -162,29 +182,52 @@ H_model = 200
 scale = 0.001
 
 # energy_layer_sizes = [D, H_energy, H_energy, 1]
-decoder_layer_sizes = [D, H_model, H_model, 1]
+decoder_layer_sizes = [D_out, H_model, H_model, 1]
 
 key, subkey = random.split(key)
 _decoder_params, key = init_random_params(scale, decoder_layer_sizes, subkey)
 _decoder_params += [[0.0 * np.ones(D), 0.0 * np.ones(D)]] # gaussian normalizer
+# _decoder_params += [[0.0 * np.ones(D_out), 0.0 * np.ones(D_out)]] # gaussian normalizer
+
+@jit
+def _decoder(x, params):
+    inputs = x
+    generate_params, decoder_params = params
+    decoder_nn_params = decoder_params[:-1]
+    mu, log_sigma_diag = decoder_params[-1]
+    sigma_diag = np.exp(log_sigma_diag)
+    for W, b in decoder_nn_params[:-1]:
+        outputs = np.dot(inputs, W) + b  # linear transformation
+        inputs = relu(outputs)     
+    outW, outb = decoder_nn_params[-1]
+    out = np.dot(inputs, outW) + outb
+    return out 
 
 def _log_pdf(x, params):
     generate_params, decoder_params = params
-    nn_params = energy_params[:-1]
-    mu, log_sigma_diag = energy_params[-1]
-    sigma_diag = np.exp(log_sigma_diag)
+
     inputs = x
     for W, b in generate_params[:-1]:
         outputs = np.dot(inputs, W) + b  # linear transformation
         inputs = relu(outputs)                            # nonlinear transformation
     outW, outb = generate_params[-1]
-    outputs = sigmoid(np.dot(inputs, outW) + outb)
+    output = sigmoid(np.dot(inputs, outW) + outb)
 
-    outW, outb = nn_params[-1]
-    out = np.dot(inputs, outW)+ outb
-    return np.sum(out) + np.sum(-0.5 * (x - mu) **2 / sigma_diag) 
+    # discrimator / decoder?
+    inputs = output
+    decoder_nn_params = decoder_params[:-1]
+    mu, log_sigma_diag = decoder_params[-1]
+    sigma_diag = np.exp(log_sigma_diag)
+    for W, b in decoder_nn_params[:-1]:
+        outputs = np.dot(inputs, W) + b  # linear transformation
+        inputs = relu(outputs)     
 
-model_layer_sizes = [D, H_model, H_model*2, D_out]
+    outW, outb = decoder_nn_params[-1]
+    out = np.dot(inputs, outW) + outb
+
+    return np.sum(out) + np.sum(-0.5 * (x - mu) **2 / sigma_diag)
+
+model_layer_sizes = [D, H_model, H_model, D_out]
 key, subkey = random.split(key)
 _generate_params, key = init_random_params(scale, model_layer_sizes, subkey)
 
@@ -198,7 +241,7 @@ def _generate(xs, params):
     outputs = sigmoid(np.dot(inputs, outW) + outb)
     return outputs
 
-_params = [_energy_params, _model_params]
+_params = [_generate_params, _decoder_params]
 params, unflatten = ravel_pytree(_params)
 log_pdf = jit(lambda x, params : _log_pdf(x, unflatten(params)))
 
@@ -214,7 +257,7 @@ def _total_loss(xs, ys, params, sigma=np.array([1.0,2.0,5.0,10.0,20.0,50.0])):
     outs = _generate(xs, params)
     k_xx = np.mean(rbf_kernel(outs, outs, sigma=sigma))
     k_xy = np.mean(rbf_kernel(outs, ys, sigma=sigma))
-    k_yy = np.mean(rbf_kernel(outs, ys, sigma=sigma))
+    k_yy = np.mean(rbf_kernel(ys, ys, sigma=sigma))
     return np.sqrt(k_xx - 2.0 * k_xy + k_yy)
 
 loss = lambda x, y, params : _total_loss(x, y, unflatten(params))
@@ -239,7 +282,7 @@ def backwards_step(theta, dL_dtheta, us, d, x, xL, xR, alphas, dL_dx, prev_dL_dx
 
     # compute gradients of xL and xR wrt theta
     L_grad_theta = -1.0 * (grad_theta(theta, xL) - grad_theta(theta, x)) / np.dot(d, grad_x_ad(x, theta, z_L, d))
-    R_grad_theta = -1.0 * (grad_theta(theta, xL) - grad_theta(theta, x)) / np.dot(d, grad_x_ad(x, theta, z_R, d))
+    R_grad_theta = -1.0 * (grad_theta(theta, xR) - grad_theta(theta, x)) / np.dot(d, grad_x_ad(x, theta, z_R, d))
 
     # compute gradient dL / dtheta
     dLd = np.dot(dL_dx_s, d) # dot product between loss gradient and direction - this is used multiple times 
@@ -253,27 +296,9 @@ def backwards_step(theta, dL_dtheta, us, d, x, xL, xR, alphas, dL_dx, prev_dL_dx
 
     return dL_dtheta, prev_dL_dx
 
-def backwards2(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs, ys):
-    dL_dtheta = np.zeros_like(theta)
-    prev_dL_dx = np.zeros_like(xs[0])
-    for s in range(S-1, -1, -1):
-        dL_dtheta, prev_dL_dx = backwards_step(theta, dL_dtheta, us[s,:], ds[s], xs[s], 
-                                               xLs[s], xRs[s], alphas[s], dL_dxs[s], prev_dL_dx)
-    return dL_dtheta + loss_grad_params(theta, xs[1:], ys)
 
 from jax import lax
-# def backwards3(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs, ys):
-#     dL_dtheta = np.zeros_like(theta)
-#     prev_dL_dx = np.zeros_like(xs[0])
-#     def body_fun(i, val):
-#         import ipdb; ipdb.set_trace()
-#         s = i.astype(int)
-#         dL_dtheta, prev_dL_dx = val 
-#         dL_dtheta, prev_dL_dx = backwards_step(theta, dL_dtheta, us[s,:], ds[s], xs[s], 
-#                                                xLs[s], xRs[s], alphas[s], dL_dxs[s], prev_dL_dx)
-#         return [dL_dtheta, prev_dL_dx]
-#     lax.fori_loop(-(S-1), 0, body_fun, [dL_dtheta, prev_dL_dx])
-#     return dL_dtheta + loss_grad_params(theta, xs[1:], ys)
+
 @jit
 def backwards3(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs, ys):
 
@@ -296,18 +321,6 @@ def backwards3(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs, ys):
     dL_dtheta = val[1]
     return dL_dtheta + loss_grad_params(theta, xs[1:], ys)
 
-# test_array = np.arange(S)
-# def cond_fun(val):
-#     return val[0] > -1
-
-# def body_fun(val):
-#     # val[1] += val[0]
-#     val[1] += test_array[val[0]]
-#     val[0] -= 1
-#     return val 
-
-# out = lax.while_loop(cond_fun, body_fun, [S-1, 0])
-
 # test functions
 S = 64 # number of samples
 key, *subkeys = random.split(key, 4)
@@ -317,22 +330,25 @@ ds_norm = np.array([d / np.linalg.norm(d) for d in ds])
 x = 0.1 * random.normal(subkeys[2], (D,)) # initial x 
 
 # run forward pass
-xs, xLs, xRs, alphas = forwards(S, params, x, f_alpha, us, ds_norm)
+xs, xLs, xRs, alphas = forwards(S, params, x, us, ds_norm)
 
 # run backward pass
 key, *subkeys = random.split(key)
 ys = random.normal(key, (S, D_out))
 dL_dxs = loss_grad_xs(xs[1:], ys, params)
-# dL_dtheta = backwards(S, params, us, ds_norm, xs, xLs, xRs, alphas, grad_theta, grad_x, grad_x_ad, dL_dxs, loss_grad_params, ys)
-dL_dtheta = backwards2(S, params, us, ds_norm, xs, xLs, xRs, alphas, dL_dxs, ys)
 dL_dtheta2 = backwards3(S, params, us, ds_norm, xs, xLs, xRs, alphas, dL_dxs, ys)
-# t1 = time.time(); dL_dtheta2 = backwards3(S, params, us, ds_norm, xs, xLs, xRs, alphas, dL_dxs, ys); t2 = time.time(); print(t2-t1)
-print("Implicit: ", dL_dtheta)
+print("Implicit: ", dL_dtheta2)
 
 # load data
 N, train_images, _, test_images, _ = load_mnist()
 
 # # optimize parameters!
+# d = np.load("mmdgan_weights_64_v4.npz")
+# theta = d["theta"]
+# m=d["m"]
+# v=d["v"]
+# adam_iter=d["adam_iter"]
+
 theta = params+0.0
 M = theta.shape[0]
 thetas = [theta]
@@ -351,12 +367,13 @@ def batch_indices(iter):
 # set up randomness
 @jit
 def generate_randomness(key):
-    key, *subkeys = random.split(key, 3)
+    key, *subkeys = random.split(key, 4)
     us = random.uniform(subkeys[0], (S,2))
     ds = random.normal(subkeys[1], (S,D))
     ds_norm = np.array([d / np.linalg.norm(d) for d in ds])
     data_idx = random.randint(key, (S, ), 0, N)
-    return us, ds_norm, data_idx, key
+    x0 = random.normal(subkeys[2], (D,))
+    return us, ds_norm, data_idx, x0, key
 
 # for ADAM
 adam_iter = 0.0
@@ -403,20 +420,22 @@ def plot_update(xs, theta, key):
     plt.pause(0.01)
     return key 
 
+import time
+t1 = time.time()
 fig = plt.figure(figsize=[8,6])
-num_epochs = 3
-pbar = trange(num_iters*num_epochs)
-pbar.set_description("Loss: {:.1f}".format(losses[0]))
+num_epochs = 1
+#pbar = trange(num_iters*num_epochs)
+#pbar.set_description("Loss: {:.1f}".format(losses[0]))
 for epoch in range(num_epochs):
     for i in range(num_iters):
 
-        us, norm_ds, data_idx, key = generate_randomness(key)
+        us, norm_ds, data_idx, x0, key = generate_randomness(key)
 
         ys = train_images[data_idx]
 
         # forward pass
-        x0 = xs[-1]
-        xs, xLs, xRs, alphas = forwards(S, theta, x0, f_alpha, us, norm_ds)
+        # x0 = xs[-1]
+        xs, xLs, xRs, alphas = forwards(S, theta, x0, us, norm_ds)
 
         # backwards pass
         dL_dxs = loss_grad_xs(xs[1:], ys, theta)
@@ -426,48 +445,54 @@ for epoch in range(num_epochs):
         # ADAM
         theta, m, v, adam_iter = adam_step(theta, dL_dtheta, m, v, adam_iter)
 
-        if np.mod(i, 10) == 0:
-            key = plot_update(xs, theta, key)
-            # thetas.append(theta)
+    #    if np.mod(i, 10) == 0:
+    #        key = plot_update(xs, theta, key)
+    #         thetas.append(theta)
 
         losses.append(total_loss(xs[1:], ys, theta))
+        if np.mod(i,10)==0:
+            key = plot_update(xs, theta, key)
+            t2=time.time()
+            print("Epoch: ", epoch, "Iter: ", i, "Loss: ", losses[-1], "Time: ", t2-t1)
 
-        pbar.set_description("Loss: {:.1f}".format(losses[-1]))
-        pbar.update()
+        # if np.mod(i,250)==0:
+            # np.savez("mmdgan_weights_64_v4.npz", theta=theta, losses=np.array(losses), num_epochs=num_epochs, m=m, v=v, adam_iter=adam_iter)
 
-pbar.close()
+# np.savez("mmdgan_weights_64_v4.npz", theta=theta, losses=np.array(losses), num_epochs=num_epochs, m=m, v=v, adam_iter=adam_iter)
 
-# thetas_plot = np.array(thetas)
+# investigate learned network
+key, *subkeys = random.split(key, 4)
+train_idx = random.randint(subkeys[0], (S, ), 0, N)
+test_idx = random.randint(subkeys[1], (S, ), 0, len(test_images))
 
-# plt.savefig("optimize_moments_dim" + str(D) + "_samples" + str(S) + ".png")
+train_energies = _decoder(train_images[train_idx], unflatten(theta))
+test_energies = _decoder(test_images[test_idx], unflatten(theta))
+# oos_input = 0.5 + random.normal(subkeys[2], (S, D_out))
+oos_input = 0.5 + 0.1 * random.normal(subkeys[2], (S, D_out))
+ood_energies = _decoder(oos_input, unflatten(theta))
 
-# gauss_log_pdf = lambda x : -0.5 * (x - xstar).T @ np.linalg.inv(Cov) @ (x - xstar)
-
-xmin = -5.0
-xmax =5.0
 plt.figure()
-visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.17, dx=0.1)
-plt.title("Generative")
-
-plt.figure()
-plt.subplot(221)
-plt.plot(xs[:,0], xs[:,1])
-# test sample a lot of xs
-# S2 = 1000
-# us = npr.rand(S2, 2)
-# ds = npr.randn(S2, D)
-# norm_ds = np.array([d / np.linalg.norm(d) for d in ds])
-# x0 = xs[-1]
-# xs2, xLs, xRs, alphas = forwards(S2, theta, x0, f_alpha, us, norm_ds)
-idx=-1
-images = _generate(xs_new, unflatten(theta))
-idx+=1
-plt.figure()
-plt.imshow(images[idx].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
+plt.plot(train_energies, label="train")
+plt.plot(test_energies, label="test")
+plt.plot(ood_energies, label="ood")
+plt.legend()
 
 key, subkey = random.split(key)
-# jit_generate=jit(_generate)
-images = _generate(random.normal(subkey, (1, D)), unflatten(theta))
-# images = jit_generate(random.normal(subkey, (1, D)), unflatten(theta))
+z0 = random.normal(subkey, (D, ))
+test_image = oos_input[0]
+
+# x_images = _generate(xs[rand_idx], unflatten(theta))
+def loss_z0(z0, x_image):
+    x0 = _generate(z0, unflatten(theta))
+    return np.mean((x0 - x_image)**2)
+grad_z0 = jit(grad(loss_z0))
+alpha = 1.0
+for i in range(1000):
+    z0_g = grad_z0(z0, test_image)
+    z0 = z0 - z0_g * alpha
+
 plt.figure()
-plt.imshow(images[0].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
+plt.subplot(121)
+plt.imshow(_generate(z0, unflatten(theta)).reshape((28,28)), cmap="gray", vmin=0, vmax=1)
+plt.subplot(122)
+plt.imshow(test_image.reshape((28,28)), cmap="gray", vmin=0, vmax=1)
