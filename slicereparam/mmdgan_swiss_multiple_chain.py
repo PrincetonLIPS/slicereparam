@@ -118,7 +118,7 @@ grad_x = jit(grad(log_pdf_x))
 grad_theta = jit(grad(log_pdf_theta))
 grad_x_ad = jit(grad(log_pdf_ad))
 
-def _total_loss(xs, ys, params, sigma=np.array([1.0,2.0,5.0,10.0,20.0,50.0])):
+def _total_loss(xs, ys, params, sigma=np.array([0.02, 0.05, 0.1, 0.2, 0.5, 1.0,2.0,5.0])):
     k_xx = np.mean(rbf_kernel(xs, xs, sigma=sigma))
     k_xy = np.mean(rbf_kernel(xs, ys, sigma=sigma))
     k_yy = np.mean(rbf_kernel(ys, ys, sigma=sigma))
@@ -609,7 +609,7 @@ losses = [0.0]
 # set up iters
 S = 250
 num_iters = int(np.ceil(N / S))
-num_chains = 25
+num_chains = 10
 Sc = int(S / num_chains)
 
 @jit
@@ -628,7 +628,7 @@ def generate_randomness(key):
     x0 = random.normal(subkeys[3], (num_chains, D))
     return us, ds_norm, data_idx, x0, key
 
-burn_in = 3
+burn_in = 2
 @jit
 def generate_randomness_burnin(key):
     key, *subkeys = random.split(key, 4)
@@ -644,7 +644,7 @@ m = np.zeros(len(theta))
 v = np.zeros(len(theta))
 b1 = 0.5
 b2 = 0.9
-step_size = 0.001
+step_size = 0.0001
 eps=10**-8
 
 @jit
@@ -683,7 +683,7 @@ def plot_update(xs, theta, key):
     return key 
 
 fig = plt.figure(figsize=[8,6])
-num_epochs = 3
+num_epochs = 1
 pbar = trange(num_iters*num_epochs)
 pbar.set_description("Loss: {:.1f}".format(losses[0]))
 import time 
@@ -728,7 +728,7 @@ for epoch in range(num_epochs):
         # ADAM
         theta, m, v, adam_iter = adam_step(theta, dL_dtheta, m, v, adam_iter)
 
-        if np.mod(i, 100) == 0:
+        if np.mod(i, 10) == 0:
             plt.clf()
             plt.plot(ys[:,0], ys[:,1], 'r.', markersize=5, label="True")
             plt.plot(xs[:,0], xs[:,1], 'b.', markersize=5, label="Gen")
@@ -739,21 +739,26 @@ for epoch in range(num_epochs):
             # thetas.append(theta)
 
         losses.append(total_loss(xs[1:], ys, theta))
+        # if np.mod(i,10)==0:
+            # key = plot_update(xs, theta, key)
+            # t2=time.time()
+            # print("Epoch: ", epoch, "Iter: ", i, "Loss: ", losses[-1], "Time: ", t2-t1)
 
+        # if np.mod(i,250)==0:
+            # np.savez("mmdgan_swiss_multiple_chain_weights.npz", theta=theta, losses=np.array(losses), m=m, v=v, adam_iter=adam_iter)
 
         pbar.set_description("Loss: {:.1f}".format(losses[-1]))
         pbar.update()
 
+# np.savez("mmdgan_swiss_multiple_chain_weights.npz", theta=theta, losses=np.array(losses), m=m, v=v, adam_iter=adam_iter)
 
-
-pbar.close()
+# pbar.close()
 
 # thetas_plot = np.array(thetas)
 
 # plt.savefig("optimize_moments_dim" + str(D) + "_samples" + str(S) + ".png")
 
 # gauss_log_pdf = lambda x : -0.5 * (x - xstar).T @ np.linalg.inv(Cov) @ (x - xstar)
-np.savez("mmdgan_swiss_multiple_chain_weights.npz", theta=theta, losses=np.array(losses), m=m, v=v, adam_iter=adam_iter)
 
 # xmin = -3.0
 # xmax =3.0
@@ -770,29 +775,32 @@ np.savez("mmdgan_swiss_multiple_chain_weights.npz", theta=theta, losses=np.array
 # plt.title("Generative, Iteration: " + str(len(losses)))
 # plt.plot(X[:1000,0], X[:1000,1], 'r.', markersize=2.5)
 
-xmin = -3.0
-xmax =3.0
-plt.figure()
-ax1=plt.subplot(121)
-visualize_2D(log_pdf, params, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.15, dx=0.1,ax=ax1)
-plt.plot(X[:2500,0], X[:2500,1], 'r.', markersize=2.5)
-plt.title("Init")
-ax2=plt.subplot(122)
-visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.15, dx=0.1, ax =ax2)
-plt.plot(X[:2500,0], X[:2500,1], 'r.', markersize=2.5)
-plt.title("Generative, Iteration: " + str(len(losses)))
+# xmin = -3.0
+# xmax =3.0
+# plt.figure()
+# ax1=plt.subplot(121)
+# visualize_2D(log_pdf, params, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.15, dx=0.1,ax=ax1)
+# plt.plot(X[:2500,0], X[:2500,1], 'r.', markersize=2.5)
+# plt.title("Init")
+# ax2=plt.subplot(122)
+# visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.15, dx=0.1, ax =ax2)
+# plt.plot(X[:2500,0], X[:2500,1], 'r.', markersize=2.5)
+# plt.title("Generative, Iteration: " + str(len(losses)))
 
+d = np.load("mmdgan_swiss_multiple_chain_weights_newkernel.npz")
+theta = d["theta"]
+adam_iter = d["adam_iter"]
 xmin = -3.0
 xmax =3.0
 plt.figure()
 visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.15, dx=0.1)
-plt.title("Generative, Iteration: " + str(len(losses)))
+plt.title("Generative, Iteration: " + str(adam_iter))
 plt.plot(X[:500,0], X[:500,1], 'r.', markersize=2.5)
 
 
-plt.figure()
-plt.subplot(221)
-plt.plot(xs[:,0], xs[:,1])
+# plt.figure()
+# plt.subplot(221)
+# plt.plot(xs[:,0], xs[:,1])
 # test sample a lot of xs
 # S2 = 1000
 # us = npr.rand(S2, 2)
@@ -800,15 +808,15 @@ plt.plot(xs[:,0], xs[:,1])
 # norm_ds = np.array([d / np.linalg.norm(d) for d in ds])
 # x0 = xs[-1]
 # xs2, xLs, xRs, alphas = forwards(S2, theta, x0, f_alpha, us, norm_ds)
-idx=-1
-images = _generate(xs_new, unflatten(theta))
-idx+=1
-plt.figure()
-plt.imshow(images[idx].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
+# idx=-1
+# images = _generate(xs_new, unflatten(theta))
+# idx+=1
+# plt.figure()
+# plt.imshow(images[idx].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
 
-key, subkey = random.split(key)
-# jit_generate=jit(_generate)
-images = _generate(random.normal(subkey, (1, D)), unflatten(theta))
-# images = jit_generate(random.normal(subkey, (1, D)), unflatten(theta))
-plt.figure()
-plt.imshow(images[0].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
+# key, subkey = random.split(key)
+# # jit_generate=jit(_generate)
+# images = _generate(random.normal(subkey, (1, D)), unflatten(theta))
+# # images = jit_generate(random.normal(subkey, (1, D)), unflatten(theta))
+# plt.figure()
+# plt.imshow(images[0].reshape((28,28)), cmap="gray", vmin=0.0, vmax=1.0)
