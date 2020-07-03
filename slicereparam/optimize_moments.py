@@ -295,9 +295,9 @@ for i in range(num_iters):
     theta_reparam = theta_reparam - dL_dtheta_reparam * alpha_t
     thetas_reparam.append(theta_reparam)
 
-    if np.mod(i,25)==0:
-        plt.plot(xs[:,0], xs[:,1])
-        plt.pause(0.1)
+    # if np.mod(i,25)==0:
+        # plt.plot(xs[:,0], xs[:,1])
+        # plt.pause(0.1)
 
     pbar.set_description("Loss: {:.1f}".format(losses[-1]))
     pbar.update()

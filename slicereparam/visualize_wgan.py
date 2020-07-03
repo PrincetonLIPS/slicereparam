@@ -32,8 +32,9 @@ def swish(x):
 dataset = "swiss"
 # dataset = "circle"
 # dataset = "mog"
+# dataset = "checker"
 
-def visualize_2D(f, params=None, xmin=-5.0, xmax=5.0, dx=0.1, ax=None, vmin=0.0, vmax=0.2, log=False):
+def visualize_2D(f, params=None, xmin=-5.0, xmax=5.0, dx=0.1, ax=None, vmin=None, vmax=None, log=False):
     if ax is None:
         fig = plt.figure()
         ax = fig.gca()
@@ -49,9 +50,10 @@ def visualize_2D(f, params=None, xmin=-5.0, xmax=5.0, dx=0.1, ax=None, vmin=0.0,
             else:
                 Z[j,i] = f(np.array([x1[i], x2[j]]), params)
     if log:
-        ax.imshow(Z, extent=[xmin,xmax,xmin,xmax], origin="lower")
+        ax.imshow(Z, extent=[xmin,xmax,xmin,xmax], origin="lower", vmin=vmin, vmax=vmax)
     else:
-        ax.imshow(np.exp(Z) / (np.sum(np.exp(Z)) * dx**2), extent=[xmin,xmax,xmin,xmax], origin="lower", vmin=vmin, vmax=vmax)
+        # ax.imshow(np.exp(Z) / (np.sum(np.exp(Z)) * dx**2), extent=[xmin,xmax,xmin,xmax], origin="lower", vmin=vmin, vmax=vmax)
+        ax.imshow(np.exp(Z), extent=[xmin,xmax,xmin,xmax], origin="lower", vmin=vmin, vmax=vmax)
         # ax.imshow(np.exp(Z), extent=[xmin,xmax,xmin,xmax], origin="lower")#, vmin=vmin, vmax=vmax)
     ax.set_xlim([xmin, xmax])
     ax.set_ylim([xmin, xmax])
@@ -360,12 +362,12 @@ if dataset is "swiss":
 
 elif dataset is "circle":
     N = 100000
-    noise = 0.01
+    noise = 0.001
     rs = np.array([0.5,1.0,1.5,2.0])
     key, subkey = random.split(key)
-    # zs = random.randint(subkey, (N, ), minval=0, maxval=4)
-    # r_zs = rs[zs]
-    r_zs = np.ones((N,))
+    zs = random.randint(subkey, (N, ), minval=0, maxval=4)
+    r_zs = rs[zs]
+    # r_zs = np.ones((N,))
     key, subkey = random.split(key)
     angles = 2.0 * np.pi * random.uniform(subkey, (N,))
     X = r_zs[:,None] * np.hstack((np.cos(angles)[:,None], np.sin(angles[:,None])))
@@ -385,8 +387,31 @@ elif dataset is "mog":
             key, subkey = random.split(key)
             X_new = np.array([mu1, mu2]) + np.sqrt(noise) * random.normal(subkey, (N_class, D))
             X = np.vstack((X, X_new))
-    X = random.shuffle(key, X, axis=0)
+
+    key, subkey = random.split(key)
+    idx = random.shuffle(subkey, np.arange(N))
+    X = X[idx]
     X = X / 2.828
+
+elif dataset is "checker":
+
+    N = 100000
+    x0s = np.array([-2.0, -2.0, -1.0, -1.0,  0.0,  0.0,  1.0,  1.0])
+    y0s = np.array([-1.0,  1.0, -2.0,  0.0, -1.0,  1.0, -2.0,  0.0])
+    X = np.empty([0,D])
+    num_classes = x0s.shape[0]
+    N_classes = int(N / num_classes)
+    plt.figure()
+    for x0, y0 in zip(x0s, y0s):
+        key, subkey = random.split(key)
+        X_new = np.array([y0, x0]) + random.uniform(subkey, (N_classes, D))
+        X = np.vstack((X, X_new))
+        plt.plot(x0, y0, 'r.')
+
+    key, subkey = random.split(key)
+    idx = random.shuffle(subkey, np.arange(N))
+    X = X[idx]
+
 
 # # optimize parameters!
 theta = params+0.0
@@ -461,12 +486,16 @@ step_size = 0.001
 eps=10**-8
 
 if dataset is "swiss":
-    # d = np.load("wgan_swiss_v4_iter5000.npz")
-    d = np.load("wgan_swiss_v4.npz")
+    # d = np.load("wgan_swiss_v4_iter35001.0.npz")
+    d = np.load("../results/wgan_swiss_v5_iter15001.0.npz")
+    # d = np.load("../results/wgan_swiss_v5.npz")
 elif dataset is "circle":
-    d = np.load("wgan_circle.npz")
+    # d = np.load("wgan_circle.npz")
+    d = np.load("../results/wgan_circle_v2.npz")
 elif dataset is "mog":
-    d = np.load("wgan_mog.npz")
+    d = np.load("../results/wgan_mog.npz")
+elif dataset is "checker":
+    d = np.load("../results/wgan_check_iter10000.npz")
 m = d["m"]
 v = d["v"]
 m_phi = d["m_phi"]
@@ -502,12 +531,14 @@ lamb_val = 10.0
 n_critic = 10
 
 # us, norm_ds, x0, key = generate_randomness_var(num_chains * n_critic, key)
-# mu0, log_var0 = unflatten(theta)[-1]
-# x0 = mu0 + np.sqrt(np.exp(log_var0)) * x0
+key, subkey = random.split(key)
+x0 = random.normal(subkey, (num_chains * n_critic, D))
+mu0, log_var0 = unflatten(theta)[-1]
+x0 = mu0 + np.sqrt(np.exp(log_var0)) * x0
 us, norm_ds, data_idx, key = generate_randomness_var(num_chains * n_critic, key)
-x0 = X[data_idx]
-xs, _, _, _ = forwards(Sc+burn_in_critic, theta, x0, us, norm_ds)
-xs = xs[burn_in_critic+1:].reshape((Sc*num_chains*n_critic, D))
+# x0 = X[data_idx]
+xs0, _, _, _ = forwards(Sc+burn_in_critic, theta, x0, us, norm_ds)
+xs = xs0[burn_in_critic+1:].reshape((Sc*num_chains*n_critic, D))
 
 data_idx, key = generate_data_idx(key)
 ys = X[data_idx]
@@ -536,7 +567,9 @@ adam_iter=d["adam_iter"]
 xmin =-2.0
 xmax = 2.0
 plt.figure()
-visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.4, dx=0.1, log=False, ax=plt.gca())
+visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=None, vmax=None, dx=0.1, log=True, ax=plt.gca())
+# visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, vmin=-60.0, vmax=-35.0, dx=0.1, log=True, ax=plt.gca())
+# visualize_2D(log_pdf, theta, xmin=xmin, xmax=xmax, dx=0.1, log=True, ax=plt.gca())
 plt.title("Iteration " + str(adam_iter))
 plt.plot(X[:500,0], X[:500,1], 'k.', markersize=2.5, alpha=0.5)
 
@@ -544,6 +577,6 @@ plt.plot(X[:500,0], X[:500,1], 'k.', markersize=2.5, alpha=0.5)
 xmin = -2.0
 xmax =2.0
 plt.figure()
-visualize_2D(discriminator, phi, xmin=xmin, xmax=xmax, vmin=0.0, vmax=0.25, dx=0.1, log=True, ax=plt.gca())
+visualize_2D(discriminator, phi, xmin=xmin, xmax=xmax, dx=0.1, log=True, ax=plt.gca())
 plt.title("Iteration " + str(adam_iter))
 plt.plot(X[:500,0], X[:500,1], 'k.', markersize=2.5, alpha=0.5)
