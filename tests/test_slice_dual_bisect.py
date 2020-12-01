@@ -154,20 +154,36 @@ def forwards(S, theta, x, us, ds):
         alphas.append(alpha)
     return np.array(xs), np.array(xLs), np.array(xRs), np.array(alphas)
 
-var1 = 1.0
-var2 = 2.0
+var1 = 2.0
+var2 = 1.0
+# def _log_pdf(x, params):
+
+#     mu1 = params[0]
+#     mu2 = params[1]
+
+#     log1 = -0.5 * (x - mu1)**2 / var1 - 0.5 * np.sqrt(2.0 * np.pi * var1)
+#     log2 = -0.5 * (x - mu2)**2 / var2 - 0.5 * np.sqrt(2.0 * np.pi * var2)
+#     return np.sum(logsumexp(np.array([log1,log2]),axis=0))
+
+var3 = 1.5
+w1 = 1.0 / 3.0 
+w2 = 1.0 / 3.0 
+w3 = 1.0 / 3.0
 def _log_pdf(x, params):
 
     mu1 = params[0]
     mu2 = params[1]
+    mu3 = params[2]
 
-    log1 = -0.5 * (x - mu1)**2 / var1 - 0.5 * np.sqrt(2.0 * np.pi * var1)
-    log2 = -0.5 * (x - mu2)**2 / var2 - 0.5 * np.sqrt(2.0 * np.pi * var2)
-    return np.sum(logsumexp(np.array([log1,log2]),axis=0))
+    log1 = -0.5 * (x - mu1)**2 / var1 - 0.5 * np.sqrt(2.0 * np.pi * var1) + np.log(w1)
+    log2 = -0.5 * (x - mu2)**2 / var2 - 0.5 * np.sqrt(2.0 * np.pi * var2) + np.log(w2)
+    log3 = -0.5 * (x - mu3)**2 / var3 - 0.5 * np.sqrt(2.0 * np.pi * var3) + np.log(w3)
+    return np.sum(logsumexp(np.array([log1,log2,log3]),axis=0))
+
 
 # sample from exponential (positive support)
-def _log_pdf(x, params):
-    return np.sum(-np.log(params[0]) - 1.0 * np.maximum(x, 0.0) * params[0] - np.sign(np.minimum(x, 0)) * np.log(1e-25))
+# def _log_pdf(x, params):
+    # return np.sum(-np.log(params[0]) - 1.0 * np.maximum(x, 0.0) * params[0] - np.sign(np.minimum(x, 0)) * np.log(1e-25))
 # _params = [1.0]
 
 # compute necessary gradients
@@ -178,15 +194,15 @@ grad_x = jit(grad(log_pdf_x))
 grad_theta = jit(grad(log_pdf_theta))
 grad_x_ad = jit(grad(log_pdf_ad))
 
-_params = [-3.0, 3.0]
+_params = [-4.0, 0.0, 4.0]
 params, unflatten = ravel_pytree(_params)
 log_pdf = jit(lambda x, params : _log_pdf(x, unflatten(params)))
 
 D = 1
 key = random.PRNGKey(5)
 
-S = 200 # number of samples
-num_chains = 200 # number of chains
+S = 20000 # number of samples
+num_chains = 1 # number of chains
 key, *subkeys = random.split(key, 4)
 us = random.uniform(subkeys[0], (S,num_chains,2))
 ds = random.normal(subkeys[1], (S*num_chains,D))
@@ -202,7 +218,7 @@ t2 = time.time()
 print(t2-t1)
 xs_plot = np.reshape(xs[1:,:,0], S*num_chains)
 dx = 0.01
-x_range = np.arange(-10,10,dx)
+x_range = np.arange(-12,12,dx)
 # g1 = 1.0 / np.sqrt(2.0 * np.pi * var1) * np.exp(-0.5 * (x_range - _params[0])**2 / var1)
 # g2 = 1.0 / np.sqrt(2.0 * np.pi * var2) * np.exp(-0.5 * (x_range - _params[1])**2 / var2)
 # z1 = 0.5 
@@ -211,7 +227,7 @@ pdf = np.array([np.exp(log_pdf(x, params)) for x in x_range])
 normalizer = np.sum(pdf)*dx
 
 plt.figure(figsize=[8,4])
-plt.subplot(211)
+plt.subplot(121)
 plt.plot(x_range, pdf / normalizer)
 plt.hist(xs_plot, 80, density=True);
 plt.title("with step out bracket")
@@ -246,7 +262,7 @@ def forwards_without_choose_start(S, theta, x, us, ds):
 xs2, xLs, xRs, alphas = forwards_without_choose_start(S, params, x, us, ds_norm)
 xs_plot2 = np.reshape(xs2[1:,:,0], S*num_chains)
 # plt.figure(figsize=[8,4])
-plt.subplot(212)
+plt.subplot(122)
 plt.plot(x_range, pdf / normalizer)
 plt.hist(xs_plot2, 80, density=True, label="w/o choose start");
 plt.title("without step out bracket")
@@ -302,31 +318,31 @@ def get_jacobians(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs):
     return dL_dtheta, J_xs
 
 
-S = 100 # number of samples
-num_chains = 1 # number of chains
-key, *subkeys = random.split(key, 4)
-us = random.uniform(subkeys[0], (S,num_chains,2))
-ds = random.normal(subkeys[1], (S*num_chains,D))
-ds_norm = ds / np.sqrt(np.sum(ds**2, axis=1))[:,None]
-ds_norm = ds_norm.reshape((S, num_chains, D))
-x = 0.0 + 3.0 * random.normal(subkeys[2], (num_chains,D)) # initial x 
-xs, xLs, xRs, alphas = forwards(S, params, x, us, ds_norm)
+# S = 100 # number of samples
+# num_chains = 1 # number of chains
+# key, *subkeys = random.split(key, 4)
+# us = random.uniform(subkeys[0], (S,num_chains,2))
+# ds = random.normal(subkeys[1], (S*num_chains,D))
+# ds_norm = ds / np.sqrt(np.sum(ds**2, axis=1))[:,None]
+# ds_norm = ds_norm.reshape((S, num_chains, D))
+# x = 0.0 + 3.0 * random.normal(subkeys[2], (num_chains,D)) # initial x 
+# xs, xLs, xRs, alphas = forwards(S, params, x, us, ds_norm)
 
-chain_number = 0
-dL_dtheta, J_xs = get_jacobians(S, params, us[:,chain_number,:], ds_norm[:,chain_number,:],
-                                xs[:,chain_number,:], xLs[:,chain_number,:], xRs[:,chain_number,:],
-                                alphas[:,chain_number,:], np.zeros((S,D)))
-J_xs.reverse()
-J_xs = np.array(J_xs)
-S_plot = 100
-plt.figure()
-plt.subplot(211)
-plt.plot(np.arange(S_plot+1), xs[:S_plot+1,chain_number,0])
-plt.ylabel("$x_n$")
-# plt.subplot(312)
-# plt.plot(np.arange(S_plot)+1, np.abs((J_xs[:S_plot,0])))
-# plt.xlabel("iteration")
-plt.subplot(212)
-plt.plot(np.arange(S_plot)+1, np.abs(np.cumprod(J_xs[:S_plot,0])))
-plt.xlabel("iteration n")
-plt.ylabel("$| dx_n / dx_0 |$")
+# chain_number = 0
+# dL_dtheta, J_xs = get_jacobians(S, params, us[:,chain_number,:], ds_norm[:,chain_number,:],
+#                                 xs[:,chain_number,:], xLs[:,chain_number,:], xRs[:,chain_number,:],
+#                                 alphas[:,chain_number,:], np.zeros((S,D)))
+# J_xs.reverse()
+# J_xs = np.array(J_xs)
+# S_plot = 100
+# plt.figure()
+# plt.subplot(211)
+# plt.plot(np.arange(S_plot+1), xs[:S_plot+1,chain_number,0])
+# plt.ylabel("$x_n$")
+# # plt.subplot(312)
+# # plt.plot(np.arange(S_plot)+1, np.abs((J_xs[:S_plot,0])))
+# # plt.xlabel("iteration")
+# plt.subplot(212)
+# plt.plot(np.arange(S_plot)+1, np.abs(np.cumprod(J_xs[:S_plot,0])))
+# plt.xlabel("iteration n")
+# plt.ylabel("$| dx_n / dx_0 |$")

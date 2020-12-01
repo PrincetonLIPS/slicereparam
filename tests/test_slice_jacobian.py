@@ -224,7 +224,7 @@ def get_jacobians(S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs):
     return dL_dtheta, np.array(J_xs), np.array(det_J_xs)
 
 
-S = 20 # number of samples
+S = 5 # number of samples
 num_chains = 1 # number of chains
 key, *subkeys = random.split(key, 4)
 us = random.uniform(subkeys[0], (S,num_chains,2))
@@ -252,7 +252,7 @@ for i in range(S):
     spr.append(np.max(np.abs(np.linalg.eigvals(J_total))))
 spr = np.array(spr)
 
-S_plot = 100
+S_plot = 5
 plt.figure()
 plt.subplot(211)
 plt.plot(np.arange(S_plot+1), xs[:S_plot+1,chain_number,0])
