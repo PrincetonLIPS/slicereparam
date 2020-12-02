@@ -71,7 +71,7 @@ def dual_bisect_method(
 @partial(jit, static_argnums=(0,))
 def choose_start(
     func,
-    log_start = -2.0, log_space = 1.0 / 3.0):
+    log_start = -3.0, log_space = 1.0 / 5.0):
 
     batch_func = vmap(func, (0))
 
@@ -103,3 +103,4 @@ def choose_start(
     val = lax.while_loop(cond_fun, body_fun, init_val)
     aL, bR, aL_val, bR_val, i = val
     return [aL, bR]
+

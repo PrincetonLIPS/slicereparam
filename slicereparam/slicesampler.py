@@ -31,7 +31,7 @@ class slicesampler(object):
     - num_chains : number of MCMC chains
 
     """
-    def __init__(self, params, log_pdf, D, total_loss, Sc=1, num_chains=1, **kwargs):
+    def __init__(self, params, log_pdf, D, total_loss=None, Sc=1, num_chains=1, **kwargs):
         
         self.params = params 
         self.log_pdf = log_pdf
@@ -53,9 +53,10 @@ class slicesampler(object):
         # grad log normalizer of posterior
         self.vmapped_grad_theta = jit(vmap(self.grad_theta, (None,0)))
 
-        self.total_loss = total_loss
-        self.loss_grad_xs = jit(grad(total_loss))
-        self.loss_grad_params = jit(grad(lambda params, x : total_loss(x, params)))
+        if total_loss is not None:
+            self.total_loss = total_loss
+            self.loss_grad_xs = jit(grad(total_loss))
+            self.loss_grad_params = jit(grad(lambda params, x : total_loss(x, params)))
 
     def forwards_step(self, x, theta, u1, u2, d):#, aL, bR):
         func = lambda alpha : self.log_pdf(x + alpha * d, theta) - self.log_pdf(x, theta) - jnp.log(u1) # root
