@@ -68,25 +68,21 @@ class slicesampler(object):
         alphas = jnp.array([z_L, z_R])
         return x, x_L, x_R, alphas
 
-    # def vmapped_forwards_step(self, x, theta, u1, u2, d):
-        # return vmap(self.forwards_step, (None,0,None,0,0,0))
-
     def forwards(self, S, theta, x, us, ds):
-        xs = jnp.zeros((S+1, self.num_chains, self.D))
-        xs = index_update(xs, index[0, :, :], x)
-        xLs = jnp.zeros((S, self.num_chains, self.D))
-        xRs = jnp.zeros((S, self.num_chains, self.D))
-        alphas = jnp.zeros((S, self.num_chains, 2))
+        xs = jnp.zeros((self.num_chains, S+1, self.D))
+        xs = index_update(xs, index[:, 0, :], x)
+        xLs = jnp.zeros((self.num_chains, S, self.D))
+        xRs = jnp.zeros((self.num_chains, S, self.D))
+        alphas = jnp.zeros((self.num_chains, S, 2))
         init_val = [xs, xLs, xRs, alphas, x]
 
         def body_fun(i, val):
             xs, xLs, xRs, alphas, x = val 
-            # x, x_L, x_R, alpha = self.vmapped_forwards_step(x, theta, us[i,:,0], us[i,:,1], ds[i])
-            x, x_L, x_R, alpha = vmap(self.forwards_step, (0,None,0,0,0))(x, theta, us[i,:,0], us[i,:,1], ds[i])
-            xs = index_update(xs, index[i+1, :, :], x)
-            xLs = index_update(xLs, index[i, :, :], x_L)
-            xRs = index_update(xRs, index[i, :, :], x_R)
-            alphas = index_update(alphas, index[i, :, :], alpha)
+            x, x_L, x_R, alpha = vmap(self.forwards_step, (0,None,0,0,0))(x, theta, us[:,i,0], us[:,i,1], ds[:,i,:])
+            xs = index_update(xs, index[:, i+1, :], x)
+            xLs = index_update(xLs, index[:, i, :], x_L)
+            xRs = index_update(xRs, index[:, i, :], x_R)
+            alphas = index_update(alphas, index[:, i, :], alpha)
             val = [xs, xLs, xRs, alphas, x]
             return val
 
@@ -96,20 +92,16 @@ class slicesampler(object):
     # set up randomness
     def generate_randomness(self, key):
         key, *subkeys = random.split(key, 4)
-        us = random.uniform(subkeys[0], (self.Sc,self.num_chains,2))
+        us = random.uniform(subkeys[0], (self.num_chains,self.Sc,2))
         ds = random.normal(subkeys[1], (self.Sc*self.num_chains,self.D))
         ds_norm = ds / jnp.sqrt(jnp.sum(ds**2, axis=1))[:,None]
-        ds_norm = ds_norm.reshape((self.Sc, self.num_chains, self.D))
+        ds_norm = ds_norm.reshape((self.num_chains, self.Sc, self.D))
         x0 = random.normal(subkeys[2], (self.num_chains, self.D))
         return us, ds_norm, x0, key
 
     @partial(jit, static_argnums=(0))
     def forwards_sample(self, theta, key):
         us, norm_ds, x0, key = self.generate_randomness(key)
-        # theta = self.params
-        # key, subkey = random.split(key)
-        # x0 = theta[:D] + jnp.sqrt(jnp.exp(theta[D:])) * random.normal(subkey, (num_chains, D))
-        # x0 = random.normal(subkey, (self.num_chains, self.D))
         xs0, xLs, xRs, alphas = self.forwards(self.Sc, theta, x0, us, norm_ds)
         return xs0, us, norm_ds, xLs, xRs, alphas, key
 
@@ -183,8 +175,8 @@ class slicesampler(object):
         dL_dxs - gradient of loss for each x, size num_chains x S x D
         """
 
-        # unpack forwards out and "swap axes", ignoring the key
-        xs0, us, norm_ds, xLs, xRs, alphas = swap_axes(*forwards_out[:-1])
+        # unpack forwards out 
+        xs0, us, norm_ds, xLs, xRs, alphas = forwards_out[:-1]
 
         # vmapped backwards function
         vmapped_backwards = vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0))
@@ -197,17 +189,33 @@ class slicesampler(object):
         return dL_dtheta
 
     @partial(jit, static_argnums=(0))
+    def compute_gradient_one_sample(self, params, dL_dx, forwards_out):
+        """
+        This function is for computing the gradient when the loss
+        is applied only at the final sampled value for each chain. 
+        It calls the regular `compute_gradient` function.
+
+        dL_dx is num_chains x 1 x D
+        """
+
+        dL_dxs = jnp.hstack((
+            jnp.zeros((self.num_chains, self.Sc-1, self.D)), 
+            dL_dx[:, None, :]))
+
+        return self.compute_gradient(params, dL_dxs, forwards_out)
+
+    @partial(jit, static_argnums=(0))
     def estimate_gradient(self, theta, key):
         # self.params = theta
         xs0, us, norm_ds, xLs, xRs, alphas, key = self.forwards_sample(theta, key)
-        xs = xs0[-1:].reshape((self.num_chains, self.D), order='F')
+        xs = xs0[:, -1:, :].reshape((self.num_chains, self.D), order='F')
 
         # backwards pass
         dL_dxs = self.loss_grad_xs(xs, theta)
         dL_dxs = dL_dxs.reshape((self.num_chains, 1, self.D))
         dL_dxs = jnp.hstack((jnp.zeros((self.num_chains, self.Sc-1, self.D)), dL_dxs))
 
-        xs0, us, norm_ds, xLs, xRs, alphas = swap_axes(xs0, us, norm_ds, xLs, xRs, alphas)
+        # xs0, us, norm_ds, xLs, xRs, alphas = swap_axes(xs0, us, norm_ds, xLs, xRs, alphas)
         vmapped_backwards = jit(vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0)))
         dL_dthetas = vmapped_backwards(self.Sc, theta, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs)
         dL_dtheta = jnp.mean(dL_dthetas, axis=0)

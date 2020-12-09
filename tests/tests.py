@@ -83,7 +83,7 @@ def test_sampler_cdf():
     model = slicesampler(params, log_pdf, D, Sc=Sc, num_chains=num_chains)
     out = model.forwards_sample(params, key)
     xs0 = out[0]
-    xs = xs0[1:].reshape(num_chains * Sc, D)
+    xs = xs0[:,1:,:].reshape(num_chains * Sc, D)
 
     dx = 0.01
     x_range = jnp.arange(-12,12,dx)
@@ -131,8 +131,7 @@ def test_finite_difference():
         model = slicesampler(params, log_pdf, D, Sc=Sc, num_chains=num_chains)
         forwards_out = model.forwards_sample(params, key)
 
-        xs = forwards_out[0][1:]
-        xs = jnp.swapaxes(xs,0,1)
+        xs = forwards_out[0][:, 1:, :]
         dL_dxs = loss_grad_xs(xs, params)
 
         dL_dtheta = model.compute_gradient(params, dL_dxs, forwards_out)
@@ -147,8 +146,10 @@ def test_finite_difference():
             forwards_out1 = model.forwards_sample(params1, key)
             model.params = params2
             forwards_out2 = model.forwards_sample(params2, key)
-            xs1 = forwards_out1[0][1:].reshape((num_chains, Sc, D), order='F')
-            xs2 = forwards_out2[0][1:].reshape((num_chains, Sc, D), order='F')
+            # xs1 = forwards_out1[0][1:].reshape((num_chains, Sc, D), order='F')
+            # xs2 = forwards_out2[0][1:].reshape((num_chains, Sc, D), order='F')
+            xs1 = forwards_out1[0][:, 1:, :]
+            xs2 = forwards_out2[0][:, 1:, :]
             for nc in range(num_chains):
                 loss1 = total_loss(xs1[nc], params1)
                 loss2 = total_loss(xs2[nc], params2) 
@@ -156,6 +157,10 @@ def test_finite_difference():
 
         dthetas = jnp.mean(jnp.asarray(dthetas), axis=0)
         assert jnp.linalg.norm(dL_dtheta - dthetas) < 1e-2
+
+
+# def test_root_finder():
+#     return 
 
 if __name__ == "__main__":
     test_grad_diagonal_gaussian_KL()
