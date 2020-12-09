@@ -61,6 +61,7 @@ def test_grad_diagonal_gaussian_KL():
 
     assert jnp.linalg.norm(dL_dtheta - true_grad(params)) < 1e-2
 
+
 def test_sampler_cdf():
 
     var1, var2, var3 = 2.0, 1.0, 1.5
@@ -79,9 +80,8 @@ def test_sampler_cdf():
     Sc = 5000
     num_chains = 100
     key = random.PRNGKey(5)
-    model = slicesampler(
-        params, log_pdf, D, total_loss=None, Sc=Sc, num_chains=num_chains)
-    out = model.forwards_sample(key)
+    model = slicesampler(params, log_pdf, D, Sc=Sc, num_chains=num_chains)
+    out = model.forwards_sample(params, key)
     xs0 = out[0]
     xs = xs0[1:].reshape(num_chains * Sc, D)
 
@@ -94,6 +94,70 @@ def test_sampler_cdf():
     assert jnp.linalg.norm(numerical_cdf - empirical_cdf) < 0.1
 
 
+def test_finite_difference():
+
+    # write a test to estimate gradient via slice sampling and finite diff
+    # make sure close 
+    # set up randomness
+    key = random.PRNGKey(1234)
+
+    # Set up params
+    D = 5   # number of dimensions
+    scale = 0.1
+    key, *subkeys = random.split(key, 3)
+    _params = [scale * random.normal(subkeys[0], (D, )), scale * random.normal(subkeys[1], (D, ))]
+
+    def _log_pdf(x, params):
+        mu = params[0]
+        sigma_diag = jnp.exp(params[1])
+        return jnp.sum(-0.5 * (x - mu) **2 / sigma_diag)
+
+    params, unflatten = ravel_pytree(_params)
+    log_pdf = jit(lambda x, params : _log_pdf(x, unflatten(params)))
+    vmapped_log_pdf = jit(vmap(log_pdf, (0,None)))
+
+    def _total_loss(xs, params):
+        loss = jnp.sum(xs**2)
+        return loss
+    total_loss = jit(lambda x, params : _total_loss(x, params))
+    loss_grad_xs = jit(grad(total_loss))
+
+    # run test over 1, >1 number of MCMC chains and 1, >1 number of samples
+    num_chains_vals = [1, 2]
+    Sc_vals = [1, 5]
+
+    for num_chains, Sc in zip(num_chains_vals, Sc_vals):
+
+        model = slicesampler(params, log_pdf, D, Sc=Sc, num_chains=num_chains)
+        forwards_out = model.forwards_sample(params, key)
+
+        xs = forwards_out[0][1:]
+        xs = jnp.swapaxes(xs,0,1)
+        dL_dxs = loss_grad_xs(xs, params)
+
+        dL_dtheta = model.compute_gradient(params, dL_dxs, forwards_out)
+
+        # compute gradient via finite differences
+        dx = 1e-3
+        M = params.shape[0]
+        dthetas = [jnp.zeros_like(params) for nc in range(num_chains)]
+        for m, v in enumerate(jnp.eye(M)):
+            params1 = params - dx * v
+            params2 = params + dx * v
+            forwards_out1 = model.forwards_sample(params1, key)
+            model.params = params2
+            forwards_out2 = model.forwards_sample(params2, key)
+            xs1 = forwards_out1[0][1:].reshape((num_chains, Sc, D), order='F')
+            xs2 = forwards_out2[0][1:].reshape((num_chains, Sc, D), order='F')
+            for nc in range(num_chains):
+                loss1 = total_loss(xs1[nc], params1)
+                loss2 = total_loss(xs2[nc], params2) 
+                dthetas[nc] = dthetas[nc] + (loss2 - loss1) / (2.0 * dx) * v 
+
+        dthetas = jnp.mean(jnp.asarray(dthetas), axis=0)
+        assert jnp.linalg.norm(dL_dtheta - dthetas) < 1e-2
+
 if __name__ == "__main__":
     test_grad_diagonal_gaussian_KL()
     test_sampler_cdf()
+    test_finite_difference()

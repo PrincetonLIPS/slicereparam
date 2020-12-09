@@ -104,9 +104,9 @@ class slicesampler(object):
         return us, ds_norm, x0, key
 
     @partial(jit, static_argnums=(0))
-    def forwards_sample(self, key):
+    def forwards_sample(self, theta, key):
         us, norm_ds, x0, key = self.generate_randomness(key)
-        theta = self.params
+        # theta = self.params
         # key, subkey = random.split(key)
         # x0 = theta[:D] + jnp.sqrt(jnp.exp(theta[D:])) * random.normal(subkey, (num_chains, D))
         # x0 = random.normal(subkey, (self.num_chains, self.D))
@@ -175,9 +175,31 @@ class slicesampler(object):
         return dL_dtheta
 
     @partial(jit, static_argnums=(0))
+    def compute_gradient(self, params, dL_dxs, forwards_out):
+        """
+        This function computes the gradient given the outputs of forward sampling
+        and losses associated with the xs. 
+
+        dL_dxs - gradient of loss for each x, size num_chains x S x D
+        """
+
+        # unpack forwards out and "swap axes", ignoring the key
+        xs0, us, norm_ds, xLs, xRs, alphas = swap_axes(*forwards_out[:-1])
+
+        # vmapped backwards function
+        vmapped_backwards = vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0))
+
+        # gradient of params through samples 
+        dL_dtheta = jnp.mean(
+            vmapped_backwards(self.Sc, params, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs), 
+            axis=0)
+
+        return dL_dtheta
+
+    @partial(jit, static_argnums=(0))
     def estimate_gradient(self, theta, key):
-        self.params = theta
-        xs0, us, norm_ds, xLs, xRs, alphas, key = self.forwards_sample(key)
+        # self.params = theta
+        xs0, us, norm_ds, xLs, xRs, alphas, key = self.forwards_sample(theta, key)
         xs = xs0[-1:].reshape((self.num_chains, self.D), order='F')
 
         # backwards pass
