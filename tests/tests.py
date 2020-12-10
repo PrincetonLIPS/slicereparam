@@ -158,6 +158,7 @@ def test_finite_difference():
         dthetas = jnp.mean(jnp.asarray(dthetas), axis=0)
         assert jnp.linalg.norm(dL_dtheta - dthetas) < 1e-2
 
+        key = forwards_out[-1]
 
 # def test_root_finder():
 #     return 

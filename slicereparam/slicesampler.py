@@ -8,6 +8,8 @@ from functools import partial
 
 from slicereparam.rootfinder import dual_bisect_method, choose_start
 
+from inspect import signature
+
 def swap_axes(xs0, us, norm_ds, xLs, xRs, alphas):
     xs0 = jnp.swapaxes(xs0,0,1)
     us = jnp.swapaxes(us,0,1)
@@ -31,10 +33,17 @@ class slicesampler(object):
     - num_chains : number of MCMC chains
 
     """
-    def __init__(self, params, log_pdf, D, total_loss=None, Sc=1, num_chains=1, **kwargs):
+    def __init__(
+        self, params, log_pdf, D, total_loss=None, Sc=1, num_chains=1, **kwargs):
         
         self.params = params 
-        self.log_pdf = log_pdf
+
+        num_args = len(signature(log_pdf).parameters)
+        if num_args == 2:
+            self.log_pdf = lambda x, theta, y : log_pdf(x, theta)
+        elif num_args != 3:
+            warning.warn("log_pdf function should have 2 or 3 arguments.")
+
         vmapped_log_pdf = jit(vmap(self.log_pdf, (0,None)))
 
         self.Sc = Sc 
@@ -43,23 +52,24 @@ class slicesampler(object):
 
         # set up for backwards pass
         # compute necessary gradients
-        def log_pdf_theta(theta, x):    return self.log_pdf(x, theta)
-        def log_pdf_x(x, theta):        return self.log_pdf(x, theta)
-        def log_pdf_ad(x, theta, a, d): return self.log_pdf(x + a * d, theta)
+        def log_pdf_theta(theta, x, y):    return self.log_pdf(x, theta, y)
+        def log_pdf_x(x, theta, y):        return self.log_pdf(x, theta, y)
+        def log_pdf_ad(x, theta, a, d, y): return self.log_pdf(x + a * d, theta, y)
         self.grad_x = jit(grad(log_pdf_x))
         self.grad_theta = jit(grad(log_pdf_theta))
         self.grad_x_ad = jit(grad(log_pdf_ad))
 
         # grad log normalizer of posterior
-        self.vmapped_grad_theta = jit(vmap(self.grad_theta, (None,0)))
+        self.vmapped_grad_theta = jit(vmap(self.grad_theta, (None,0,0)))
 
+        # TODO -> handle this with optional arg..? 
         if total_loss is not None:
             self.total_loss = total_loss
             self.loss_grad_xs = jit(grad(total_loss))
             self.loss_grad_params = jit(grad(lambda params, x : total_loss(x, params)))
 
-    def forwards_step(self, x, theta, u1, u2, d):#, aL, bR):
-        func = lambda alpha : self.log_pdf(x + alpha * d, theta) - self.log_pdf(x, theta) - jnp.log(u1) # root
+    def forwards_step(self, x, theta, u1, u2, d, y):#, aL, bR):
+        func = lambda alpha : self.log_pdf(x + alpha * d, theta, y) - self.log_pdf(x, theta, y) - jnp.log(u1) # root
         aL, bR = choose_start(func)
         z_L, z_R = dual_bisect_method(func, aL=aL, bL=-1e-10, aR=1e-10, bR=bR)
         x_L = x + d*z_L
@@ -68,7 +78,7 @@ class slicesampler(object):
         alphas = jnp.array([z_L, z_R])
         return x, x_L, x_R, alphas
 
-    def forwards(self, S, theta, x, us, ds):
+    def forwards(self, S, theta, x, us, ds, y):
         xs = jnp.zeros((self.num_chains, S+1, self.D))
         xs = index_update(xs, index[:, 0, :], x)
         xLs = jnp.zeros((self.num_chains, S, self.D))
@@ -78,7 +88,7 @@ class slicesampler(object):
 
         def body_fun(i, val):
             xs, xLs, xRs, alphas, x = val 
-            x, x_L, x_R, alpha = vmap(self.forwards_step, (0,None,0,0,0))(x, theta, us[:,i,0], us[:,i,1], ds[:,i,:])
+            x, x_L, x_R, alpha = vmap(self.forwards_step, (0,None,0,0,0,0))(x, theta, us[:,i,0], us[:,i,1], ds[:,i,:], y)
             xs = index_update(xs, index[:, i+1, :], x)
             xLs = index_update(xLs, index[:, i, :], x_L)
             xRs = index_update(xRs, index[:, i, :], x_R)
@@ -100,10 +110,15 @@ class slicesampler(object):
         return us, ds_norm, x0, key
 
     @partial(jit, static_argnums=(0))
-    def forwards_sample(self, theta, key):
+    def _forwards_sample(self, theta, key, ys):
         us, norm_ds, x0, key = self.generate_randomness(key)
-        xs0, xLs, xRs, alphas = self.forwards(self.Sc, theta, x0, us, norm_ds)
-        return xs0, us, norm_ds, xLs, xRs, alphas, key
+        xs0, xLs, xRs, alphas = self.forwards(self.Sc, theta, x0, us, norm_ds, ys)
+        return xs0, us, norm_ds, xLs, xRs, alphas, ys, key
+
+    def forwards_sample(self, theta, key, ys=None):
+        if ys is None:
+            ys = jnp.zeros(self.num_chains) # dummy variable
+        return self._forwards_sample(theta, key, ys)
 
     def sample_initialization(self):
         """
@@ -118,7 +133,7 @@ class slicesampler(object):
         """
         return
 
-    def backwards_step(self, theta, dL_dtheta, us, d, x, xL, xR, alphas, dL_dx, prev_dL_dx):
+    def backwards_step(self, theta, dL_dtheta, us, d, x, xL, xR, alphas, dL_dx, prev_dL_dx, y):
 
         u1 = us[0]
         u2 = us[1]
@@ -130,8 +145,8 @@ class slicesampler(object):
         dL_dx_s = dL_dx + prev_dL_dx
 
         # compute gradients of xL and xR wrt theta
-        L_grad_theta = -1.0 * (self.grad_theta(theta, xL) - self.grad_theta(theta, x)) / jnp.dot(d, self.grad_x_ad(x, theta, z_L, d))
-        R_grad_theta = -1.0 * (self.grad_theta(theta, xR) - self.grad_theta(theta, x)) / jnp.dot(d, self.grad_x_ad(x, theta, z_R, d))
+        L_grad_theta = -1.0 * (self.grad_theta(theta, xL, y) - self.grad_theta(theta, x, y)) / jnp.dot(d, self.grad_x_ad(x, theta, z_L, d, y))
+        R_grad_theta = -1.0 * (self.grad_theta(theta, xR, y) - self.grad_theta(theta, x, y)) / jnp.dot(d, self.grad_x_ad(x, theta, z_R, d, y))
 
         # compute gradient dL / dtheta
         dLd = jnp.dot(dL_dx_s, d) # dot product between loss gradient and direction - this is used multiple times 
@@ -139,13 +154,13 @@ class slicesampler(object):
         dL_dtheta = dL_dtheta + dL_dtheta_s
 
         # propagate loss backwards : compute gradient times Jacobian of dx_s  / dx_{s-1}
-        L_grad_x = -1.0 * ( self.grad_x_ad(x, theta, z_L, d) - self.grad_x(x, theta) ) / jnp.dot(d, self.grad_x_ad(x, theta, z_L, d))
-        R_grad_x = -1.0 * ( self.grad_x_ad(x, theta, z_R, d) - self.grad_x(x, theta) ) / jnp.dot(d, self.grad_x_ad(x, theta, z_R, d))
+        L_grad_x = -1.0 * ( self.grad_x_ad(x, theta, z_L, d, y) - self.grad_x(x, theta, y) ) / jnp.dot(d, self.grad_x_ad(x, theta, z_L, d, y))
+        R_grad_x = -1.0 * ( self.grad_x_ad(x, theta, z_R, d, y) - self.grad_x(x, theta, y) ) / jnp.dot(d, self.grad_x_ad(x, theta, z_R, d, y))
         prev_dL_dx = dL_dx_s + u2 * dLd * R_grad_x + (1-u2) * dLd * L_grad_x
 
         return dL_dtheta, prev_dL_dx
 
-    def backwards(self, S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs):
+    def backwards(self, S, theta, us, ds, xs, xLs, xRs, alphas, dL_dxs, y):
 
         dL_dtheta = jnp.zeros_like(theta)
         prev_dL_dx = jnp.zeros_like(xs[0])
@@ -158,7 +173,7 @@ class slicesampler(object):
             s = val[0]
             dL_dtheta, prev_dL_dx = val[1:] 
             dL_dtheta, prev_dL_dx = self.backwards_step(theta, dL_dtheta, us[s,:], ds[s], xs[s], 
-                                                xLs[s], xRs[s], alphas[s], dL_dxs[s], prev_dL_dx)
+                                                xLs[s], xRs[s], alphas[s], dL_dxs[s], prev_dL_dx, y)
             val[0] -= 1
             return [val[0], dL_dtheta, prev_dL_dx]
 
@@ -176,14 +191,14 @@ class slicesampler(object):
         """
 
         # unpack forwards out 
-        xs0, us, norm_ds, xLs, xRs, alphas = forwards_out[:-1]
+        xs0, us, norm_ds, xLs, xRs, alphas, ys = forwards_out[:-1]
 
         # vmapped backwards function
-        vmapped_backwards = vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0))
+        vmapped_backwards = vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0, 0))
 
         # gradient of params through samples 
         dL_dtheta = jnp.mean(
-            vmapped_backwards(self.Sc, params, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs), 
+            vmapped_backwards(self.Sc, params, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs, ys), 
             axis=0)
 
         return dL_dtheta
@@ -205,9 +220,9 @@ class slicesampler(object):
         return self.compute_gradient(params, dL_dxs, forwards_out)
 
     @partial(jit, static_argnums=(0))
-    def estimate_gradient(self, theta, key):
+    def _estimate_gradient(self, theta, key, ys):
         # self.params = theta
-        xs0, us, norm_ds, xLs, xRs, alphas, key = self.forwards_sample(theta, key)
+        xs0, us, norm_ds, xLs, xRs, alphas, ys, key = self._forwards_sample(theta, key, ys)
         xs = xs0[:, -1:, :].reshape((self.num_chains, self.D), order='F')
 
         # backwards pass
@@ -215,15 +230,18 @@ class slicesampler(object):
         dL_dxs = dL_dxs.reshape((self.num_chains, 1, self.D))
         dL_dxs = jnp.hstack((jnp.zeros((self.num_chains, self.Sc-1, self.D)), dL_dxs))
 
-        # xs0, us, norm_ds, xLs, xRs, alphas = swap_axes(xs0, us, norm_ds, xLs, xRs, alphas)
-        vmapped_backwards = jit(vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0)))
-        dL_dthetas = vmapped_backwards(self.Sc, theta, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs)
+        vmapped_backwards = jit(vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0, 0)))
+        dL_dthetas = vmapped_backwards(self.Sc, theta, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs, ys)
         dL_dtheta = jnp.mean(dL_dthetas, axis=0)
         dL_dtheta = dL_dtheta + self.loss_grad_params(theta, xs) / self.num_chains
 
         loss = self.total_loss(xs, theta) / self.num_chains
-        dL_dtheta = dL_dtheta - jnp.mean(self.vmapped_grad_theta(theta, xs), axis=0)
+        dL_dtheta = dL_dtheta - jnp.mean(self.vmapped_grad_theta(theta, xs, ys), axis=0)
 
         return dL_dtheta, loss, key
 
+    def estimate_gradient(self, theta, key, ys=None):
+        if ys is None:
+            ys = jnp.zeros(self.num_chains) # dummy variable
+        return self._estimate_gradient(theta, key, ys)
     # def fit(self, key):
