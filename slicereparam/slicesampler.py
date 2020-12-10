@@ -9,6 +9,7 @@ from functools import partial
 from slicereparam.rootfinder import dual_bisect_method, choose_start
 
 from inspect import signature
+import warnings 
 
 def swap_axes(xs0, us, norm_ds, xLs, xRs, alphas):
     xs0 = jnp.swapaxes(xs0,0,1)
@@ -34,21 +35,28 @@ class slicesampler(object):
 
     """
     def __init__(
-        self, params, log_pdf, D, total_loss=None, Sc=1, num_chains=1, **kwargs):
+        self, params, log_pdf, D, total_loss=None, Sc=1, num_chains=1, Sl=None, **kwargs):
         
         self.params = params 
 
         num_args = len(signature(log_pdf).parameters)
         if num_args == 2:
             self.log_pdf = lambda x, theta, y : log_pdf(x, theta)
-        elif num_args != 3:
-            warning.warn("log_pdf function should have 2 or 3 arguments.")
+        elif num_args == 3: 
+            self.log_pdf = log_pdf
+        else:
+            warnings.warn("log_pdf function should have 2 or 3 arguments.")
 
-        vmapped_log_pdf = jit(vmap(self.log_pdf, (0,None)))
+        vmapped_log_pdf = jit(vmap(self.log_pdf, (0,None,0)))
 
         self.Sc = Sc 
         self.num_chains = num_chains
         self.D = D
+
+        if Sl is None:
+            self.Sl = self.Sc 
+        else:
+            self.Sl = Sl
 
         # set up for backwards pass
         # compute necessary gradients
@@ -197,8 +205,9 @@ class slicesampler(object):
         vmapped_backwards = vmap(self.backwards, (None, None, 0, 0, 0, 0, 0, 0, 0, 0))
 
         # gradient of params through samples 
-        dL_dtheta = jnp.mean(
-            vmapped_backwards(self.Sc, params, us, norm_ds, xs0, xLs, xRs, alphas, dL_dxs, ys), 
+        dL_dtheta = jnp.mean(vmapped_backwards(
+            self.Sl, params, us[:,-self.Sl:,:], norm_ds[:,-self.Sl:,:], xs0[:,-(self.Sl+1):,:], 
+            xLs[:,-self.Sl:,:], xRs[:,-self.Sl:,:], alphas[:,-self.Sl:,:], dL_dxs, ys), 
             axis=0)
 
         return dL_dtheta
@@ -214,7 +223,7 @@ class slicesampler(object):
         """
 
         dL_dxs = jnp.hstack((
-            jnp.zeros((self.num_chains, self.Sc-1, self.D)), 
+            jnp.zeros((self.num_chains, self.Sl-1, self.D)), 
             dL_dx[:, None, :]))
 
         return self.compute_gradient(params, dL_dxs, forwards_out)
