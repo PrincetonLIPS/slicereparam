@@ -253,4 +253,3 @@ class slicesampler(object):
         if ys is None:
             ys = jnp.zeros(self.num_chains) # dummy variable
         return self._estimate_gradient(theta, key, ys)
-    # def fit(self, key):

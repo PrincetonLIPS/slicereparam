@@ -4,9 +4,11 @@ config.update("jax_enable_x64", True)
 import jax.numpy as jnp 
 from jax import jit, grad, vmap
 from jax import random
+from jax.ops import index, index_update
 from jax.flatten_util import ravel_pytree
 from jax.scipy.special import logsumexp
 
+from slicereparam.functional import setup_slice_sampler
 from slicereparam.slicesampler import slicesampler
 
 def test_grad_diagonal_gaussian_KL():
@@ -163,7 +165,93 @@ def test_finite_difference():
 # def test_root_finder():
 #     return 
 
+def test_custom_vjp_finite_difference():
+
+    # write a test to estimate gradient via slice sampling and finite diff
+    # make sure close 
+    # set up randomness
+    key = random.PRNGKey(123)
+
+    # Set up params
+    D = 5   # number of dimensions
+    scale = 0.1
+    key, *subkeys = random.split(key, 3)
+    _params = [scale * random.normal(subkeys[0], (D, )), scale * random.normal(subkeys[1], (D, ))]
+
+    def _log_pdf(x, params):
+        mu = params[0]
+        sigma_diag = jnp.exp(params[1])
+        return jnp.sum(-0.5 * (x - mu) **2 / sigma_diag)
+
+    params, unflatten = ravel_pytree(_params)
+    log_pdf = jit(lambda x, params : _log_pdf(x, unflatten(params)))
+
+    # run test over 1, >1 number of MCMC chains and 1, >1 number of samples
+    num_chains_vals = [1, 1, 2, 2]
+    S_vals = [1, 5, 1, 5]
+
+    for S, num_chains in zip(S_vals, num_chains_vals):
+
+        # slice_sample = setup_slice_sampler(log_pdf, params, D, S, num_chains=num_chains)
+        slice_sample = setup_slice_sampler(log_pdf, D, S, num_chains=num_chains)
+
+        key, *subkeys = random.split(key, 3)
+        x0 = random.normal(subkeys[0], (num_chains, D))
+        # out = slice_sample(subkeys[1], params, x0)
+        out = slice_sample(params, x0, subkeys[1])
+
+        def loss(xs):
+            return jnp.mean(xs**2)
+
+        def compute_loss(params, x0, key):
+            xs = slice_sample(params, x0, key)
+            return loss(xs)
+
+        grad_loss = jit(grad(compute_loss))
+
+        key, *subkeys = random.split(key, 3)
+        x0 = random.normal(subkeys[0], (num_chains, D))
+        grad_params_ad = grad_loss(params, x0, subkeys[1])
+
+        # compute gradient via finite differences
+        dx = 1e-3
+        M = params.shape[0]
+        dthetas = [jnp.zeros_like(params) for nc in range(num_chains)]
+        for m, v in enumerate(jnp.eye(M)):
+            params1 = params - dx * v
+            params2 = params + dx * v
+            xs1 = slice_sample(params1, x0, subkeys[1])
+            xs2 = slice_sample(params2, x0, subkeys[1])
+            for nc in range(num_chains):
+                loss1 = loss(xs1[nc])
+                loss2 = loss(xs2[nc])
+                dthetas[nc] = dthetas[nc] + (loss2 - loss1) / (2.0 * dx) * v 
+
+        grad_params_fd = jnp.mean(jnp.asarray(dthetas), axis=0)
+
+        grad_x0 = jit(grad(compute_loss, argnums=1))
+        grad_x0_ad = grad_x0(params, x0, subkeys[1])
+        dx = 1e-3
+        dxs = [jnp.zeros(D) for nc in range(num_chains)]
+        for nc in range(num_chains):
+            for m, v in enumerate(jnp.eye(D)):
+                x01 = x0[nc] - dx * v
+                x02 = x0[nc] + dx * v
+                x01 = index_update(x0, index[nc, :], x01)
+                x02 = index_update(x0, index[nc, :], x02)
+                xs1 = slice_sample(params, x01, subkeys[1])
+                xs2 = slice_sample(params, x02, subkeys[1])
+                loss1 = loss(xs1)
+                loss2 = loss(xs2)
+                dxs[nc] = dxs[nc] + (loss2 - loss1) / (2.0 * dx) * v 
+        grad_x0_fd = jnp.asarray(dxs)
+
+        assert jnp.linalg.norm(grad_params_ad - grad_params_fd) < 1e-3
+        assert jnp.linalg.norm(grad_x0_ad - grad_x0_fd) < 1e-3
+
+
 if __name__ == "__main__":
     test_grad_diagonal_gaussian_KL()
     test_sampler_cdf()
     test_finite_difference()
+    test_custom_vjp_finite_difference()
