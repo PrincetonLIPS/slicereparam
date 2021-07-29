@@ -104,3 +104,81 @@ def choose_start(
     aL, bR, aL_val, bR_val, i = val
     return [aL, bR]
 
+@partial(jit, static_argnums=(0,))
+def bisect_method(
+    func, a=-1e5, b=-1e-5,
+    tol=1e-6, maxiter=100):
+
+    batch_func = vmap(func, (0))
+    i = maxiter-1.0
+    sa, sb = jnp.sign(batch_func(jnp.array([a, b])))
+
+    init_val = [a, b, sa, sb, i]
+
+    def cond_fun(val):
+        a, b, sa, sb, i = val
+        return jnp.sum(b-a) + 100 * jnp.minimum(i, 0.0) > tol
+
+    def body_fun(val):
+
+        # unpack val
+        a, b, sa, sb, i = val
+
+        # new center points
+        c = (a+b)/2.0
+        sc = jnp.sign(func(c))
+
+        # L
+        a = jnp.sum(c * jnp.maximum( sc * sa, 0.0) + \
+            a * jnp.maximum( -1.0 * sc * sa, 0.0))
+        b = jnp.sum(c * jnp.maximum( sc * sb, 0.0) + \
+            b * jnp.maximum( -1.0 * sc * sb, 0.0))
+        sa = jnp.sum(sc * jnp.maximum( sc * sa, 0.0) + \
+            sa * jnp.maximum( -1.0 * sc * sa, 0.0))
+        sb = jnp.sum(sc * jnp.maximum( sc * sb, 0.0) + \
+            sb * jnp.maximum( -1.0 * sc * sb, 0.0))
+
+        i = i - 1
+        val = [a, b, sa, sb, i]
+
+        return val
+
+    val = lax.while_loop(cond_fun, body_fun, init_val)
+
+    # unpack val
+    a, b, sa, sb, i = val
+
+    # new center points
+    c = (a+b)/2.0
+
+    return c
+
+@partial(jit, static_argnums=(0,))
+def single_choose_start(
+    func,
+    log_start = -3.0, log_space = 1.0 / 5.0):
+
+    i = 0
+    a = 1.0 * jnp.power(10.0, log_start + i * log_space)
+    a_val = func(a)
+    init_val = [a, a_val, i]
+
+    def cond_fun(val):
+        a, a_val, i = val
+        return jnp.maximum(a_val, 0.0) + 100 * jnp.minimum(100. - i, 0.0) > 0.0
+
+    def body_fun(val):
+
+        a, a_val, i = val
+        i = i+1
+        sign_a = jnp.sign(a_val)
+        a = jnp.sum(jnp.power(10.0, log_start + i * log_space) * jnp.maximum(sign_a, 0.0) \
+                + a * jnp.maximum(-1.0 * sign_a, 0.0))
+        a_val = func(a)
+        val = [a, a_val, i]
+
+        return val
+
+    val = lax.while_loop(cond_fun, body_fun, init_val)
+    a, a_val, i = val
+    return a
